@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+venv/
+.env
+backend/hubbro.db
+backend/uploads/
+node_modules/
+dist/

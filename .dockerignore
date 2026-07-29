@@ -1,0 +1,17 @@
+# keep the build context small and avoid baking local state into the image
+**/node_modules
+**/dist
+**/venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+
+backend/hubbro.db
+backend/uploads/
+backend/.env
+.env
+
+.git
+.gitignore
+*.md
+!README.md

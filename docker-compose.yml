@@ -1,0 +1,56 @@
+services:
+  hubbro:
+    build: .
+    image: hub-bro:latest
+    container_name: hub-bro
+    restart: unless-stopped
+
+    # Host port 8080 -> app port 8000. Put your own nginx/IIS in front for TLS.
+    ports:
+      - "${HOST_PORT:-8080}:8000"
+
+    env_file:
+      - .env
+
+    environment:
+      ENV: production
+      # SQLite file and CSV uploads both live in the volume below
+      DATABASE_URL: sqlite:////data/hubbro.db
+      UPLOAD_DIR: /data/uploads
+      TRUST_PROXY: "true"
+      # Uncomment along with the redis service below to share the cache
+      # across workers. Leave unset for a single-worker deployment.
+      # REDIS_URL: redis://redis:6379/0
+
+    volumes:
+      # Named volume keeps dashboards, sources and uploads across rebuilds.
+      # Back this up: `docker run --rm -v hubbro-data:/data -v $PWD:/backup \
+      #   alpine tar czf /backup/hubbro-backup.tgz /data`
+      - hubbro-data:/data
+
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional shared cache. Uncomment this and REDIS_URL above, then
+  # `docker compose up -d`. Only needed if you run multiple workers.
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: hub-bro-redis
+  #   restart: unless-stopped
+  #   command: ["redis-server", "--save", "", "--appendonly", "no"]
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 30s
+
+volumes:
+  hubbro-data:
