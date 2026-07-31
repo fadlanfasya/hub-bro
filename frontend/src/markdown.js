@@ -7,7 +7,8 @@
  * renders as elements means nothing can escape into markup.
  *
  * Supported: #/##/### headings, **bold**, *italic*, `code`, [links](url),
- * - bullet lists, 1. numbered lists, > quotes, --- rules, paragraphs.
+ * - bullet lists, 1. numbered lists, > quotes, --- rules, paragraphs,
+ * and pipe tables with an optional alignment row.
  */
 
 const SAFE_LINK = /^(https?:\/\/|mailto:|\/)/i
@@ -46,6 +47,30 @@ export function parseInline(text) {
   return tokens
 }
 
+/** Split a table row into cell strings, tolerating missing outer pipes. */
+export function splitRow(line) {
+  return line.trim().replace(/^\|/, '').replace(/\|$/, '')
+    .split('|').map((c) => c.trim())
+}
+
+/** Is this the `|---|:--:|` row that separates a table header from its body? */
+export function isAlignmentRow(line) {
+  if (!line || !line.includes('-')) return false
+  const cells = splitRow(line)
+  return cells.length > 0 && cells.every((c) => /^:?-{1,}:?$/.test(c))
+}
+
+/** left | center | right per column, from the alignment row. */
+function parseAlignments(line) {
+  return splitRow(line).map((c) => {
+    const left = c.startsWith(':')
+    const right = c.endsWith(':')
+    if (left && right) return 'center'
+    if (right) return 'right'
+    return 'left'
+  })
+}
+
 /** Parse a document into block tokens. */
 export function parseMarkdown(source) {
   const lines = String(source || '').replace(/\r\n/g, '\n').split('\n')
@@ -67,10 +92,34 @@ export function parseMarkdown(source) {
   }
   const flushAll = () => { flushParagraph(); flushList() }
 
-  for (const raw of lines) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const raw = lines[index]
     const line = raw.trimEnd()
 
     if (!line.trim()) { flushAll(); continue }
+
+    // a pipe table is a header row followed by an alignment row
+    if (line.includes('|') && isAlignmentRow(lines[index + 1])) {
+      flushAll()
+      const header = splitRow(line)
+      const aligns = parseAlignments(lines[index + 1])
+      const rows = []
+      let cursor = index + 2
+      while (cursor < lines.length && lines[cursor].includes('|') && lines[cursor].trim()) {
+        const cells = splitRow(lines[cursor])
+        // pad or trim so every row matches the header width
+        rows.push(header.map((_, i) => parseInline(cells[i] ?? '')))
+        cursor += 1
+      }
+      blocks.push({
+        type: 'table',
+        header: header.map(parseInline),
+        aligns: header.map((_, i) => aligns[i] || 'left'),
+        rows,
+      })
+      index = cursor - 1
+      continue
+    }
 
     const heading = /^(#{1,3})\s+(.*)$/.exec(line)
     if (heading) {

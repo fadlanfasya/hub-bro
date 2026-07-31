@@ -212,6 +212,16 @@ async def fetch(config: dict, options: dict) -> dict:
     query = validate_query(options.get("query", ""))
     url = build_url(config)
 
+    # A blank password is almost always an oversight rather than a server that
+    # allows passwordless login, and the driver's own error is cryptic.
+    driver_key = (config.get("driver") or "postgresql").lower()
+    if driver_key != "sqlite" and not config.get("dsn") \
+            and config.get("user") and not config.get("password"):
+        raise ValueError(
+            "No password is set for this data source. Edit it and enter the "
+            "database password, or use a DSN if the server allows passwordless login."
+        )
+
     dialect = (config.get("driver") or "postgresql").lower()
     limit = min(int(options.get("limit") or DEFAULT_LIMIT), MAX_LIMIT)
     query, params, leftover = _wrap_with_filters(query, options.get("filters"), dialect)

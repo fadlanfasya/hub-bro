@@ -35,6 +35,7 @@ export default function DataSources() {
   const [appToken, setAppToken] = useState('')
   const [userToken, setUserToken] = useState('')
   const [sql, setSql] = useState({ driver: 'postgresql', host: '', port: '', database: '', user: '', password: '' })
+  const [hasStoredPassword, setHasStoredPassword] = useState(false)
   const setSqlField = (k, v) => setSql((s) => ({ ...s, [k]: v }))
   const [file, setFile] = useState(null)
   const [error, setError] = useState('')
@@ -51,6 +52,7 @@ export default function DataSources() {
     setBaseUrl(''); setFile(null); setVerifySsl(true); setError('')
     setAppToken(''); setUserToken('')
     setSql({ driver: 'postgresql', host: '', port: '', database: '', user: '', password: '' })
+    setHasStoredPassword(false)
   }
 
   const startEdit = (ds) => {
@@ -67,8 +69,11 @@ export default function DataSources() {
       driver: ds.config.driver || 'postgresql',
       host: ds.config.host || '', port: ds.config.port || '',
       database: ds.config.database || '', user: ds.config.user || '',
-      password: ds.config.password || '',
+      // start blank rather than prefilling the mask: blank now means
+      // "keep the stored password", so an edit can't silently wipe it
+      password: '',
     })
+    setHasStoredPassword(Boolean(ds.config.password))
     const rows = Object.entries(ds.config.headers || {}).map(([key, value]) => ({ key, value }))
     setHeaderRows(rows.length ? rows : [{ key: '', value: '' }])
     setFile(null)
@@ -88,7 +93,11 @@ export default function DataSources() {
     if (type === 'glpi') {
       return { base_url: baseUrl, app_token: appToken, user_token: userToken, verify_ssl: verifySsl }
     }
-    if (type === 'sql') return { ...sql }
+    if (type === 'sql') {
+      // sending the mask tells the backend to keep whatever is already stored
+      const password = (editingId && !sql.password && hasStoredPassword) ? MASK : sql.password
+      return { ...sql, password }
+    }
     return {}
   }
 
@@ -262,9 +271,15 @@ export default function DataSources() {
                   <input value={sql.user} onChange={(e) => setSqlField('user', e.target.value)}
                     placeholder="readonly_user" />
                   <label>Password</label>
-                  <input type="password" value={sql.password}
+                  <input type="password" value={sql.password} autoComplete="new-password"
                     onChange={(e) => setSqlField('password', e.target.value)}
-                    placeholder={editingId ? 'unchanged' : ''} />
+                    placeholder={hasStoredPassword ? 'Leave blank to keep the current password' : ''} />
+                  {!editingId && !sql.password && (
+                    <p className="hint" style={{ color: 'var(--danger)' }}>
+                      PostgreSQL, MySQL and Doris reject connections without a password
+                      unless the server is set to trust auth.
+                    </p>
+                  )}
                   <p className="hint">
                     Stored encrypted. Use a read-only account — Hub-Bro rejects anything but SELECT,
                     but least privilege is still the right call.

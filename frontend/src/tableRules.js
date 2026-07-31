@@ -7,7 +7,23 @@
  * themes stay consistent.
  */
 
-export const TONES = ['good', 'warn', 'bad', 'muted']
+/**
+ * Available cell tones. Each has a matching `td.tone-X` rule in styles.css,
+ * with light and dark variants chosen to keep text readable on its own fill.
+ * `warn` is kept as an alias of the amber tone so rules saved earlier still work.
+ */
+export const TONES = [
+  { key: 'good', label: 'Green' },
+  { key: 'yellow', label: 'Yellow' },
+  { key: 'warn', label: 'Amber' },
+  { key: 'orange', label: 'Orange' },
+  { key: 'bad', label: 'Red' },
+  { key: 'blue', label: 'Blue' },
+  { key: 'purple', label: 'Purple' },
+  { key: 'muted', label: 'Grey' },
+]
+
+export const TONE_KEYS = TONES.map((t) => t.key)
 
 export function isNumeric(value) {
   if (typeof value === 'number') return Number.isFinite(value)
@@ -38,6 +54,69 @@ export function nextSort(current, column) {
   if (current?.column !== column) return { column, direction: 'asc' }
   if (current.direction === 'asc') return { column, direction: 'desc' }
   return null
+}
+
+/**
+ * Interactive table filtering — the search box and column pickers inside the
+ * widget, as opposed to the fixed filters set in the widget config.
+ *
+ * These run on rows already fetched, so they're instant and cost nothing
+ * upstream. They're also transient: reloading clears them, which is what you
+ * want for a quick look rather than a saved view.
+ */
+
+/** Does any visible cell contain the search text? */
+export function matchesSearch(row, columns, query) {
+  const needle = String(query || '').trim().toLowerCase()
+  if (!needle) return true
+  return columns.some((c) => String(row[c] ?? '').toLowerCase().includes(needle))
+}
+
+/**
+ * Apply the search box and per-column selections.
+ * `columnFilters` is { column: [selected values] } — an empty or missing
+ * array means that column isn't filtering anything.
+ */
+export function applyTableFilters(rows, columns, { search = '', columnFilters = {} } = {}) {
+  const active = Object.entries(columnFilters).filter(([, values]) => values?.length)
+  if (!String(search).trim() && !active.length) return rows
+
+  return rows.filter((row) => {
+    if (!matchesSearch(row, columns, search)) return false
+    return active.every(([column, values]) =>
+      values.some((v) => String(row[column] ?? '') === String(v)))
+  })
+}
+
+/**
+ * Distinct values in a column, for the picker. Sorted numerically when the
+ * column is numeric, alphabetically otherwise, and capped so a high-cardinality
+ * column doesn't render thousands of checkboxes.
+ */
+export function distinctValues(rows, column, limit = 200) {
+  const seen = new Map()
+  for (const row of rows) {
+    const raw = row[column]
+    const key = raw === null || raw === undefined || raw === '' ? '' : String(raw)
+    if (!seen.has(key)) seen.set(key, 0)
+    seen.set(key, seen.get(key) + 1)
+    if (seen.size > limit) break
+  }
+  const values = [...seen.entries()].map(([value, count]) => ({ value, count }))
+  const numeric = values.every((v) => v.value === '' || isNumeric(v.value))
+  values.sort((a, b) => {
+    if (a.value === '') return 1
+    if (b.value === '') return -1
+    return numeric
+      ? Number(a.value) - Number(b.value)
+      : a.value.localeCompare(b.value, undefined, { numeric: true })
+  })
+  return { values, truncated: seen.size > limit }
+}
+
+/** How many column filters are currently doing something. */
+export function activeFilterCount(columnFilters = {}) {
+  return Object.values(columnFilters).filter((v) => v?.length).length
 }
 
 function matches(cellValue, rule) {

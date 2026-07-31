@@ -5,6 +5,8 @@ Widget options understood here:
             turns one wide row into one row per column — see apply_unpivot
   filters:  [{"column": "Status", "op": "eq", "value": "Running"}]
             ops: eq, ne, contains, gt, gte, lt, lte, in, not_empty
+  cross_filters: same shape, but a column this widget doesn't have is skipped
+            instead of excluding every row (see apply_transforms)
   group_by: "Status"                     -> one row per distinct value
   aggregate: "count" | "sum" | "avg" | "min" | "max"
   value_column: column to aggregate when aggregate != count
@@ -117,6 +119,16 @@ def apply_transforms(result: dict, options: dict) -> dict:
     # 1. filter
     filters = [f for f in (options.get("filters") or []) if f.get("column")]
     for f in filters:
+        rows = [r for r in rows if _matches(r, f)]
+
+    # 1b. cross-filters, from clicking a slice or row on the dashboard.
+    # Unlike a configured filter, one whose column this widget doesn't have is
+    # ignored rather than matching nothing — a selection on `status` shouldn't
+    # blank out a widget that has no status column.
+    for f in (options.get("cross_filters") or []):
+        column = f.get("column")
+        if not column or column not in columns:
+            continue
         rows = [r for r in rows if _matches(r, f)]
 
     # 2. group + aggregate

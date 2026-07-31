@@ -10,7 +10,7 @@ for suite in tests/test_transforms.py tests/test_security.py tests/test_cache.py
 done
 
 for suite in tests/test_integration.sh tests/test_glpi.sh tests/test_sharing.sh \
-             tests/test_permissions.sh tests/test_production.sh; do
+             tests/test_permissions.sh tests/test_history.sh tests/test_production.sh; do
   echo "=== $suite ==="
   bash "$suite" | tail -1
   [ "${PIPESTATUS[0]}" -eq 0 ] || FAILED=1

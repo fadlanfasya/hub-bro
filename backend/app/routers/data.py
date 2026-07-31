@@ -18,7 +18,8 @@ router = APIRouter(prefix="/api/data", tags=["data"])
 # not vary the cache key, so one upstream fetch can serve widgets that show
 # different views of the same data.
 TRANSFORM_KEYS = {
-    "unpivot", "filters", "group_by", "aggregate", "value_column", "sort", "limit",
+    "unpivot", "filters", "cross_filters", "group_by", "aggregate", "value_column",
+    "sort", "limit",
 }
 
 # Connectors that can filter server-side. For these, `filters` is sent to the

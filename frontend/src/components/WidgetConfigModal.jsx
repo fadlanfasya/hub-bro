@@ -2,6 +2,7 @@ import { useState } from 'react'
 import {
   X, Plus, ChevronDown, ChevronRight, AlignLeft, AlignCenter, AlignRight,
 } from 'lucide-react'
+import { TONES } from '../tableRules'
 
 export default function WidgetConfigModal({ widget, sources, onSave, onClose }) {
   const [title, setTitle] = useState(widget?.title || '')
@@ -72,6 +73,7 @@ export default function WidgetConfigModal({ widget, sources, onSave, onClose }) 
     if (opts.pie_center !== false) delete opts.pie_center
     if (!opts.pie_center_label) delete opts.pie_center_label
     if (!opts.accent) delete opts.accent
+    if (opts.show_filters !== false) delete opts.show_filters   // shown by default
     if (!opts.align || opts.align === 'left') delete opts.align
     // vertical default differs by type: a stat sits centred, text starts at the top
     const defaultValign = type === 'text' ? 'top' : 'middle'
@@ -373,10 +375,7 @@ export default function WidgetConfigModal({ widget, sources, onSave, onClose }) 
                   onChange={(e) => setRule(i, { value: e.target.value })} />
                 <select style={{ width: 110 }} value={rule.tone || 'bad'}
                   onChange={(e) => setRule(i, { tone: e.target.value })}>
-                  <option value="good">Green</option>
-                  <option value="warn">Amber</option>
-                  <option value="bad">Red</option>
-                  <option value="muted">Grey</option>
+                  {TONES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
                 </select>
                 <button type="button" className="ghost small icon" aria-label="Remove rule"
                   onClick={() => setOpt('color_rules',
@@ -391,6 +390,14 @@ export default function WidgetConfigModal({ widget, sources, onSave, onClose }) 
               <Plus size={13} /> Add colour rule
             </button>
             <p className="hint">First matching rule wins. Tick "whole row" style by naming the same column in several rules.</p>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+              <input type="checkbox" style={{ width: 'auto' }}
+                checked={opts.show_filters !== false}
+                onChange={(e) => setOpt('show_filters', e.target.checked)} />
+              Show the search box and column filters
+            </label>
+            <p className="hint">Lets anyone narrow the table without opening this dialog.</p>
 
             <label>Rows to display <span className="optional">(before scrolling)</span></label>
             <input type="number" min="10" value={opts.max_display_rows || ''}

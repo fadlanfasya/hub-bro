@@ -61,6 +61,8 @@ export const dashboards = {
   update: (id, payload) => api.put(`/dashboards/${id}`, payload),
   remove: (id) => api.delete(`/dashboards/${id}`),
   duplicate: (id) => api.post(`/dashboards/${id}/duplicate`),
+  history: (id) => api.get(`/dashboards/${id}/history`),
+  restore: (id, snapshotId) => api.post(`/dashboards/${id}/history/${snapshotId}/restore`),
   share: (id) => api.post(`/dashboards/${id}/share`),
   unshare: (id) => api.delete(`/dashboards/${id}/share`),
 }

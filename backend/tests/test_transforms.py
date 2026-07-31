@@ -125,6 +125,47 @@ r = apply_transforms(PER_DAY, {
 check("unpivot then group works together", r["rows"],
       [{"name": "sukses", "sum_value": 220.0}, {"name": "gagal", "sum_value": 13.0}])
 
+print("cross-filters")
+r = apply_transforms(SAMPLE, {"cross_filters": [
+    {"column": "status", "op": "eq", "value": "Running"}]})
+check("cross-filter narrows to matching rows", len(r["rows"]), 3)
+
+# the important difference from a configured filter: a column this widget
+# doesn't have is ignored, not treated as "nothing matches"
+r = apply_transforms(SAMPLE, {"cross_filters": [
+    {"column": "not_a_column", "op": "eq", "value": "x"}]})
+check("unknown column is skipped, not filtered to nothing", len(r["rows"]), 5)
+r = apply_transforms(SAMPLE, {"filters": [
+    {"column": "not_a_column", "op": "eq", "value": "x"}]})
+check("a configured filter on an unknown column still excludes everything",
+      len(r["rows"]), 0)
+
+r = apply_transforms(SAMPLE, {
+    "filters": [{"column": "site", "op": "eq", "value": "Sentul"}],
+    "cross_filters": [{"column": "status", "op": "eq", "value": "Running"}],
+})
+check("configured and cross filters combine", len(r["rows"]), 2)
+
+r = apply_transforms(SAMPLE, {
+    "cross_filters": [{"column": "status", "op": "eq", "value": "Running"}],
+    "group_by": "site",
+})
+check("cross-filter applies before grouping", r["rows"],
+      [{"site": "Sentul", "count": 2}, {"site": "Jakarta", "count": 1}])
+
+r = apply_transforms(SAMPLE, {"cross_filters": []})
+check("empty cross-filter list is a no-op", len(r["rows"]), 5)
+r = apply_transforms(SAMPLE, {"cross_filters": [{"op": "eq", "value": "x"}]})
+check("cross-filter with no column is skipped", len(r["rows"]), 5)
+
+# after an unpivot the columns are renamed, so a cross-filter must be checked
+# against the reshaped column list
+r = apply_transforms(
+    {"columns": ["sukses", "gagal"], "rows": [{"sukses": 10, "gagal": 2}]},
+    {"unpivot": {"columns": ["sukses", "gagal"]},
+     "cross_filters": [{"column": "name", "op": "eq", "value": "gagal"}]})
+check("cross-filter sees post-unpivot columns", r["rows"], [{"name": "gagal", "value": 2}])
+
 print("edge cases")
 r = apply_transforms({"columns": [], "rows": []}, {"group_by": "status"})
 check("empty input", r["rows"], [])

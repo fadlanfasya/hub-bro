@@ -70,8 +70,36 @@ class Dashboard(Base):
     definition = Column(Text, nullable=False, default='{"widgets": [], "layout": []}')
     # random token when the dashboard is shared read-only; NULL when private
     share_token = Column(String, unique=True, index=True, nullable=True)
+    # bumped on every save; a client sending a stale number is rejected so two
+    # editors can't silently overwrite each other
+    version = Column(Integer, nullable=False, default=1)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     owner = relationship("User", back_populates="dashboards")
+    snapshots = relationship("DashboardSnapshot", back_populates="dashboard",
+                             cascade="all, delete-orphan",
+                             order_by="DashboardSnapshot.id.desc()")
+
+
+class DashboardSnapshot(Base):
+    """A point-in-time copy of a dashboard, taken before each save.
+
+    Lets you undo someone else's change (or your own) rather than losing work
+    permanently. Retention is capped per dashboard — see routers/dashboards.py.
+    """
+    __tablename__ = "dashboard_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    dashboard_id = Column(Integer, ForeignKey("dashboards.id"), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    definition = Column(Text, nullable=False)
+    version = Column(Integer, nullable=False, default=1)
+    # who made the change this snapshot replaced, kept as text so deleting a
+    # user doesn't erase the history trail
+    author_email = Column(String, nullable=True)
+    note = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    dashboard = relationship("Dashboard", back_populates="snapshots")

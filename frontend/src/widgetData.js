@@ -11,9 +11,10 @@ import { resolveRange } from './timeRange'
  * Translate a widget's saved options into the payload the /data/fetch API expects.
  * `dashboardRange` is the toolbar range key; widgets opted into it inherit it.
  */
-export function buildOptions(widget, dashboardRange) {
+export function buildOptions(widget, dashboardRange, crossFilters) {
   const o = widget?.options || {}
   const opts = {}
+  if (crossFilters?.length) opts.cross_filters = crossFilters
 
   if (o.data_path) opts.data_path = o.data_path
   if (o.rename) opts.rename = o.rename

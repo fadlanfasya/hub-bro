@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { isNumeric, nextSort, sortRows, toneForCell } from './tableRules'
-import { parseInline, parseMarkdown } from './markdown'
+import {
+  TONES, TONE_KEYS, activeFilterCount, applyTableFilters, distinctValues,
+  isNumeric, matchesSearch, nextSort, sortRows, toneForCell,
+} from './tableRules'
+import { isAlignmentRow, parseInline, parseMarkdown, splitRow } from './markdown'
 import { computeTrend, formatTrend } from './format'
 
 describe('sortRows', () => {
@@ -115,6 +118,154 @@ describe('toneForCell', () => {
 
   it('returns null with no rules', () => {
     expect(toneForCell({ a: 1 }, 'a', undefined)).toBeNull()
+  })
+})
+
+describe('in-table filtering', () => {
+  const columns = ['priority', 'status', 'total']
+  const rows = [
+    { priority: 'Critical', status: 'Breach', total: 3 },
+    { priority: 'High', status: 'Warning', total: 12 },
+    { priority: 'Medium', status: 'On Track', total: 40 },
+    { priority: 'Low', status: 'On Track', total: 8 },
+  ]
+
+  describe('matchesSearch', () => {
+    it('matches any visible column', () => {
+      expect(matchesSearch(rows[0], columns, 'breach')).toBe(true)
+      expect(matchesSearch(rows[0], columns, 'critical')).toBe(true)
+    })
+
+    it('is case-insensitive and matches partials', () => {
+      expect(matchesSearch(rows[1], columns, 'WARN')).toBe(true)
+    })
+
+    it('searches numbers too', () => {
+      expect(matchesSearch(rows[2], columns, '40')).toBe(true)
+    })
+
+    it('only searches the columns shown', () => {
+      expect(matchesSearch({ a: 'x', hidden: 'secret' }, ['a'], 'secret')).toBe(false)
+    })
+
+    it('an empty query matches everything', () => {
+      expect(matchesSearch(rows[0], columns, '')).toBe(true)
+      expect(matchesSearch(rows[0], columns, '   ')).toBe(true)
+    })
+  })
+
+  describe('applyTableFilters', () => {
+    it('returns the same array when nothing is filtering', () => {
+      expect(applyTableFilters(rows, columns, {})).toBe(rows)
+    })
+
+    it('filters by search text', () => {
+      expect(applyTableFilters(rows, columns, { search: 'on track' })).toHaveLength(2)
+    })
+
+    it('filters by selected column values', () => {
+      const out = applyTableFilters(rows, columns, { columnFilters: { priority: ['High'] } })
+      expect(out).toHaveLength(1)
+      expect(out[0].priority).toBe('High')
+    })
+
+    it('treats several values in one column as OR', () => {
+      const out = applyTableFilters(rows, columns,
+        { columnFilters: { priority: ['High', 'Low'] } })
+      expect(out).toHaveLength(2)
+    })
+
+    it('treats different columns as AND', () => {
+      const out = applyTableFilters(rows, columns, {
+        columnFilters: { status: ['On Track'], priority: ['Low'] },
+      })
+      expect(out).toHaveLength(1)
+    })
+
+    it('combines search with column filters', () => {
+      const out = applyTableFilters(rows, columns, {
+        search: 'track', columnFilters: { priority: ['Medium'] },
+      })
+      expect(out).toHaveLength(1)
+    })
+
+    it('ignores an empty selection array', () => {
+      expect(applyTableFilters(rows, columns, { columnFilters: { priority: [] } })).toBe(rows)
+    })
+
+    it('compares values as strings so numbers work', () => {
+      expect(applyTableFilters(rows, columns, { columnFilters: { total: ['12'] } }))
+        .toHaveLength(1)
+    })
+
+    it('can filter everything out', () => {
+      expect(applyTableFilters(rows, columns, { search: 'nothing here' })).toHaveLength(0)
+    })
+  })
+
+  describe('distinctValues', () => {
+    it('lists unique values with counts', () => {
+      const { values } = distinctValues(rows, 'status')
+      expect(values).toHaveLength(3)
+      expect(values.find((v) => v.value === 'On Track').count).toBe(2)
+    })
+
+    it('sorts numeric columns numerically', () => {
+      const { values } = distinctValues([{ n: 100 }, { n: 9 }, { n: 25 }], 'n')
+      expect(values.map((v) => v.value)).toEqual(['9', '25', '100'])
+    })
+
+    it('sorts text alphabetically', () => {
+      const { values } = distinctValues(rows, 'priority')
+      expect(values[0].value).toBe('Critical')
+    })
+
+    it('represents blanks as an empty string and sinks them', () => {
+      const { values } = distinctValues([{ a: 'x' }, { a: null }, { a: '' }], 'a')
+      expect(values[values.length - 1].value).toBe('')
+      expect(values.find((v) => v.value === '').count).toBe(2)
+    })
+
+    it('caps high-cardinality columns and says so', () => {
+      const many = Array.from({ length: 500 }, (_, i) => ({ id: `v${i}` }))
+      const { values, truncated } = distinctValues(many, 'id', 50)
+      expect(truncated).toBe(true)
+      expect(values.length).toBeLessThanOrEqual(51)
+    })
+
+    it('handles an empty table', () => {
+      expect(distinctValues([], 'a').values).toEqual([])
+    })
+  })
+
+  describe('activeFilterCount', () => {
+    it('counts only columns with a selection', () => {
+      expect(activeFilterCount({ a: ['x'], b: [], c: ['y', 'z'] })).toBe(2)
+      expect(activeFilterCount({})).toBe(0)
+      expect(activeFilterCount()).toBe(0)
+    })
+  })
+})
+
+describe('TONES', () => {
+  it('offers yellow alongside the other colours', () => {
+    expect(TONE_KEYS).toContain('yellow')
+  })
+
+  it('keeps the older warn key so saved rules still resolve', () => {
+    expect(TONE_KEYS).toContain('warn')
+  })
+
+  it('has a unique key and a label for every tone', () => {
+    expect(new Set(TONE_KEYS).size).toBe(TONES.length)
+    for (const t of TONES) expect(t.label, t.key).toBeTruthy()
+  })
+
+  it('applies every tone through a rule', () => {
+    for (const key of TONE_KEYS) {
+      const rules = [{ column: 'v', op: 'eq', value: 'x', tone: key }]
+      expect(toneForCell({ v: 'x' }, 'v', rules), key).toBe(key)
+    }
   })
 })
 
@@ -275,5 +426,97 @@ describe('parseMarkdown', () => {
 
   it('normalises windows line endings', () => {
     expect(parseMarkdown('# a\r\n\r\nb')).toHaveLength(2)
+  })
+})
+
+describe('markdown tables', () => {
+  const SLA = [
+    '| Priority | SLA | Warning (90%) | Breach |',
+    '|----------|-----|---------------|--------|',
+    '| Critical | 8 Jam | >= 7 Jam 12 Menit | > 8 Jam |',
+    '| High | 12 Jam | >= 10 Jam 48 Menit | > 12 Jam |',
+  ].join('\n')
+
+  it('parses a header, alignment row and body', () => {
+    const [table] = parseMarkdown(SLA)
+    expect(table.type).toBe('table')
+    expect(table.header).toHaveLength(4)
+    expect(table.rows).toHaveLength(2)
+  })
+
+  it('keeps cell text intact', () => {
+    const [table] = parseMarkdown(SLA)
+    expect(table.header[0][0].value).toBe('Priority')
+    expect(table.rows[0][1][0].value).toBe('8 Jam')
+  })
+
+  it('parses inline markup inside cells', () => {
+    const md = '| a | b |\n|---|---|\n| **bold** | `code` |'
+    const [table] = parseMarkdown(md)
+    expect(table.rows[0][0][0].type).toBe('bold')
+    expect(table.rows[0][1][0].type).toBe('code')
+  })
+
+  it('reads column alignment from the separator row', () => {
+    const md = '| l | c | r |\n|:--|:-:|--:|\n| 1 | 2 | 3 |'
+    expect(parseMarkdown(md)[0].aligns).toEqual(['left', 'center', 'right'])
+  })
+
+  it('defaults to left alignment', () => {
+    const md = '| a |\n|---|\n| 1 |'
+    expect(parseMarkdown(md)[0].aligns).toEqual(['left'])
+  })
+
+  it('pads short rows to the header width', () => {
+    const md = '| a | b | c |\n|---|---|---|\n| 1 |'
+    const [table] = parseMarkdown(md)
+    expect(table.rows[0]).toHaveLength(3)
+  })
+
+  it('tolerates missing outer pipes', () => {
+    const md = 'a | b\n--- | ---\n1 | 2'
+    const [table] = parseMarkdown(md)
+    expect(table.type).toBe('table')
+    expect(table.header).toHaveLength(2)
+  })
+
+  it('needs an alignment row — a lone pipe line stays a paragraph', () => {
+    expect(parseMarkdown('a | b | c')[0].type).toBe('paragraph')
+  })
+
+  it('ends the table at a blank line and continues the document', () => {
+    const blocks = parseMarkdown('| a |\n|---|\n| 1 |\n\nAfter the table.')
+    expect(blocks).toHaveLength(2)
+    expect(blocks[0].type).toBe('table')
+    expect(blocks[1].type).toBe('paragraph')
+  })
+
+  it('sits alongside headings', () => {
+    const blocks = parseMarkdown('## SLA\n\n| a |\n|---|\n| 1 |')
+    expect(blocks.map((b) => b.type)).toEqual(['heading', 'table'])
+  })
+
+  it('handles a header with no body rows', () => {
+    const [table] = parseMarkdown('| a | b |\n|---|---|')
+    expect(table.rows).toEqual([])
+  })
+})
+
+describe('splitRow / isAlignmentRow', () => {
+  it('strips outer pipes and trims cells', () => {
+    expect(splitRow('| a | b |')).toEqual(['a', 'b'])
+    expect(splitRow('a|b')).toEqual(['a', 'b'])
+  })
+
+  it('recognises separator rows in all forms', () => {
+    for (const row of ['|---|---|', '|:--|--:|', '| :-: |', '--- | ---']) {
+      expect(isAlignmentRow(row), row).toBe(true)
+    }
+  })
+
+  it('rejects rows that are not separators', () => {
+    for (const row of ['| a | b |', '', undefined, '| 1 | 2 |', '| - a |']) {
+      expect(isAlignmentRow(row), String(row)).toBe(false)
+    }
   })
 })

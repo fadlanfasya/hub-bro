@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   RefreshCw, Plus, GripVertical, Pencil, X, LayoutGrid, ChevronLeft, Check,
-  Loader2, Copy, Share2, Lock, Unlock, Eye, Palette,
+  Loader2, Copy, Share2, Lock, Unlock, Eye, Palette, Filter, History, AlertCircle,
 } from 'lucide-react'
+import HistoryModal from '../components/HistoryModal'
+import { describeSelection, toggleSelection } from '../selection'
 import { FileText, Image } from 'lucide-react'
 import ShareModal from '../components/ShareModal'
 import ThemeScope from '../components/ThemeScope'
@@ -34,13 +36,25 @@ export default function DashboardEditor() {
   const [sharing, setSharing] = useState(false)
   const [statuses, setStatuses] = useState({})   // widgetId -> { meta, stale }
   const [themeOpen, setThemeOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [conflict, setConflict] = useState(null)
+  // transient cross-filter from clicking a slice/bar/row — never persisted
+  const [selection, setSelection] = useState(null)
+
+  const handleSelect = useCallback((next) => {
+    setSelection((current) => toggleSelection(current, next))
+  }, [])
   const saveTimer = useRef(null)
   // latest fetched rows per widget, so CSV export doesn't re-query the source
   const widgetData = useRef({})
   const gridRef = useRef(null)
+  const versionRef = useRef(1)
 
   useEffect(() => {
-    dashboards.get(id).then((res) => setDashboard(res.data))
+    dashboards.get(id).then((res) => {
+      setDashboard(res.data)
+      versionRef.current = res.data.version
+    })
     // viewers can't list data sources; they don't need them since they can't edit
     if (canEdit) datasources.list().then((res) => setSources(res.data)).catch(() => {})
   }, [id, canEdit])
@@ -57,8 +71,18 @@ export default function DashboardEditor() {
     clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(async () => {
       setSaving(true)
-      await dashboards.update(id, { definition })
-      setSaving(false)
+      try {
+        // send the version we loaded; the server rejects the write if someone
+        // else saved in the meantime rather than overwriting their work
+        const res = await dashboards.update(id, { definition, version: versionRef.current })
+        versionRef.current = res.data.version
+        setConflict(null)
+      } catch (err) {
+        if (err.response?.status === 409) setConflict(err.response.data.detail)
+        else setConflict(err.response?.data?.detail || 'Could not save')
+      } finally {
+        setSaving(false)
+      }
     }, 600)
   }, [id])
 
@@ -240,7 +264,8 @@ export default function DashboardEditor() {
         <div className="widget-body">
           <WidgetRenderer widget={w} refreshKey={refreshKey}
             dashboardRange={timeRange} onData={captureData}
-            dashboardId={id} readOnly={!canEdit} />
+            dashboardId={id} readOnly={!canEdit}
+            selection={selection} onSelect={handleSelect} />
         </div>
       </div>
     )
@@ -254,14 +279,19 @@ export default function DashboardEditor() {
           <ChevronLeft size={16} />
         </button>
         <h1>{dashboard.name}</h1>
-        {canEdit ? (
+        {!canEdit ? (
+          <span className="status-pill"><Eye size={11} /> Read-only</span>
+        ) : conflict ? (
+          <button className="status-pill error" onClick={() => window.location.reload()}
+            title={conflict}>
+            <AlertCircle size={11} /> Not saved — reload
+          </button>
+        ) : (
           <span className="save-state">
             {saving
               ? <><Loader2 size={12} className="spin" /> Saving…</>
               : <><Check size={12} /> Saved</>}
           </span>
-        ) : (
-          <span className="status-pill"><Eye size={11} /> Read-only</span>
         )}
         <span className="spacer" />
         {hasTimeSeries && (
@@ -280,6 +310,10 @@ export default function DashboardEditor() {
               onClick={() => setSharing(true)}>
               <Share2 size={13} /> {dashboard.share_token ? 'Shared' : 'Share'}
             </button>
+            <button className="secondary small" onClick={() => setHistoryOpen(true)}
+              title="Version history">
+              <History size={13} />
+            </button>
             <button className="secondary small" onClick={() => setThemeOpen(true)} title="Dashboard theme">
               <Palette size={13} />
             </button>
@@ -291,6 +325,20 @@ export default function DashboardEditor() {
       </div>
 
       <div className="editor-body">
+        {selection && (
+          <div className="filter-bar">
+            <Filter size={13} />
+            <span className="filter-chip">
+              {describeSelection(selection)}
+              <button className="ghost icon" aria-label="Clear filter"
+                onClick={() => setSelection(null)}>
+                <X size={12} />
+              </button>
+            </span>
+            <span className="muted">Widgets without this column are unaffected.</span>
+          </div>
+        )}
+
         {widgets.length === 0 && (
           <div className="empty-state">
             <LayoutGrid size={32} />
@@ -314,6 +362,29 @@ export default function DashboardEditor() {
             />
           </div>
         </ThemeScope>
+
+        {conflict && (
+          <div className="notice" style={{ marginBottom: 16 }}>
+            <AlertCircle size={14} />
+            <span>
+              {conflict} Your changes on screen are <strong>not saved</strong> — copy anything
+              you need, then reload. Earlier versions are in the history panel.
+            </span>
+          </div>
+        )}
+
+        {historyOpen && (
+          <HistoryModal
+            dashboardId={id}
+            onRestored={(updated) => {
+              setDashboard(updated)
+              versionRef.current = updated.version
+              setConflict(null)
+              setRefreshKey((k) => k + 1)
+            }}
+            onClose={() => setHistoryOpen(false)}
+          />
+        )}
 
         {themeOpen && (
           <ThemeModal

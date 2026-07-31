@@ -81,6 +81,9 @@ class DashboardCreate(BaseModel):
 class DashboardUpdate(BaseModel):
     name: Optional[str] = None
     definition: Optional[dict[str, Any]] = None
+    # the version the client last saw; a mismatch means someone else saved
+    # in the meantime and this write is rejected rather than clobbering theirs
+    version: Optional[int] = None
 
 
 class DashboardOut(BaseModel):
@@ -88,6 +91,17 @@ class DashboardOut(BaseModel):
     name: str
     definition: dict[str, Any]
     share_token: Optional[str] = None
+    version: int = 1
+
+
+class SnapshotOut(BaseModel):
+    id: int
+    name: str
+    version: int
+    author_email: Optional[str] = None
+    note: Optional[str] = None
+    created_at: Optional[datetime] = None
+    widget_count: int = 0
 
 
 # ---- Data fetch ----

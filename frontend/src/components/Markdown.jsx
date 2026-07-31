@@ -31,6 +31,31 @@ export default function Markdown({ source, size, align, valign }) {
           }
           case 'rule':
             return <hr key={i} />
+          case 'table':
+            return (
+              <table key={i} className="data markdown-table">
+                <thead>
+                  <tr>
+                    {block.header.map((cell, j) => (
+                      <th key={j} style={{ textAlign: block.aligns[j] }}>
+                        <Inline tokens={cell} />
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {block.rows.map((row, j) => (
+                    <tr key={j}>
+                      {row.map((cell, k) => (
+                        <td key={k} style={{ textAlign: block.aligns[k] }}>
+                          <Inline tokens={cell} />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )
           case 'quote':
             return <blockquote key={i}><Inline tokens={block.inline} /></blockquote>
           case 'list': {

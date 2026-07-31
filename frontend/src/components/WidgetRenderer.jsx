@@ -3,7 +3,7 @@ import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, CartesianGrid,
   ResponsiveContainer, Legend,
 } from 'recharts'
-import { AlertCircle, TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import { AlertCircle, TrendingUp, TrendingDown, Minus, Search } from 'lucide-react'
 import { data as dataApi, publicApi } from '../api'
 import { describeThreshold, evaluateThreshold } from '../thresholds'
 import { computeTrend, formatStatValue, formatTrend } from '../format'
@@ -11,13 +11,16 @@ import { computeTrend, formatStatValue, formatTrend } from '../format'
 import { buildOptions, computeStat, resolveChartFields, visibleColumns } from '../widgetData'
 import Gauge from './Gauge'
 import Markdown from './Markdown'
-import { isNumeric, nextSort, sortRows, toneForCell } from '../tableRules'
+import {
+  activeFilterCount, applyTableFilters, isNumeric, nextSort, sortRows, toneForCell,
+} from '../tableRules'
+import ColumnFilter from './ColumnFilter'
+import { canEmitSelection, crossFiltersFor, isSelected } from '../selection'
 
 const COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--chart-6)']
 
-export default function WidgetRenderer({
-  widget, refreshKey, publicToken, onData, dashboardRange, dashboardId, readOnly,
-}) {
+export default function WidgetRenderer(props) {
+  const { widget } = props
   // a text widget has no data source, so it never touches the fetch machinery
   if (widget.type === 'text') {
     return (
@@ -25,11 +28,12 @@ export default function WidgetRenderer({
         align={widget.options?.align} valign={widget.options?.valign} />
     )
   }
-  return <WidgetData {...{ widget, refreshKey, publicToken, onData, dashboardRange, dashboardId, readOnly }} />
+  return <WidgetData {...props} />
 }
 
 function WidgetData({
   widget, refreshKey, publicToken, onData, dashboardRange, dashboardId, readOnly,
+  selection, onSelect,
 }) {
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
@@ -57,7 +61,8 @@ function WidgetData({
       ? publicApi.fetch(publicToken, widget.id)
       : readOnly && dashboardId
         ? dataApi.forWidget(dashboardId, widget.id)
-        : dataApi.fetch(widget.datasource_id, buildOptions(widget, dashboardRange))
+        : dataApi.fetch(widget.datasource_id,
+          buildOptions(widget, dashboardRange, crossFiltersFor(widget, selection)))
     request
       .then((res) => {
         if (cancelled) return
@@ -72,7 +77,8 @@ function WidgetData({
       })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [widget, refreshKey, tick, publicToken, dashboardRange, readOnly, dashboardId])
+  }, [widget, refreshKey, tick, publicToken, dashboardRange, readOnly, dashboardId,
+    selection?.column, selection?.value])
 
   // only show the loading placeholder on first load; on auto-refresh keep showing current data
   if (loading && !result) return <div className="muted" style={{ padding: 12 }}>Loading…</div>
@@ -82,7 +88,9 @@ function WidgetData({
 
   // The truncated/stale warning is reported upward and drawn in the widget
   // header, so it never steals height from the chart or table.
-  return <WidgetPlot widget={widget} result={result} />
+  return (
+    <WidgetPlot widget={widget} result={result} selection={selection} onSelect={onSelect} />
+  )
 }
 
 /**
@@ -146,22 +154,33 @@ function renderSliceLabel({ cx, cy, midAngle, outerRadius, name, value, percent 
 }
 
 /** Table with click-to-sort headers and per-cell colour rules. */
-function DataTable({ columns, rows, opts }) {
+function DataTable({ columns, rows, opts, selection, onSelect }) {
   const [sort, setSort] = useState(
     opts.sort_column ? { column: opts.sort_column, direction: opts.sort_dir || 'asc' } : null
   )
+  // interactive filters, deliberately not persisted — see tableRules.js
+  const [search, setSearch] = useState('')
+  const [columnFilters, setColumnFilters] = useState({})
 
   const shown = visibleColumns(columns, opts.columns)
   const rules = opts.color_rules
   const limit = Number(opts.max_display_rows) || 200
+  const showFilters = opts.show_filters !== false
 
-  const sorted = sort ? sortRows(rows, sort.column, sort.direction) : rows
+  const filtered = showFilters
+    ? applyTableFilters(rows, shown, { search, columnFilters })
+    : rows
+  const sorted = sort ? sortRows(filtered, sort.column, sort.direction) : filtered
   const visible = sorted.slice(0, limit)
   const numericColumns = new Set(
     shown.filter((c) => rows.length && rows.every((r) => r[c] == null || isNumeric(r[c])))
   )
 
-  return (
+  const filterCount = activeFilterCount(columnFilters)
+  const isFiltering = Boolean(search.trim()) || filterCount > 0
+  const clearAll = () => { setSearch(''); setColumnFilters({}) }
+
+  const table = (
     <table className="data sortable">
       <thead>
         <tr>
@@ -169,42 +188,85 @@ function DataTable({ columns, rows, opts }) {
             const active = sort?.column === c
             return (
               <th key={c} className={numericColumns.has(c) ? 'num' : undefined}>
-                <button type="button" className="th-sort"
-                  aria-label={`Sort by ${c}`}
-                  onClick={() => setSort((s) => nextSort(s, c))}>
-                  {c}
-                  <span className={active ? 'sort-icon on' : 'sort-icon'}>
-                    {active ? (sort.direction === 'asc' ? '↑' : '↓') : '↕'}
-                  </span>
-                </button>
+                <span className="th-inner">
+                  <button type="button" className="th-sort"
+                    aria-label={`Sort by ${c}`}
+                    onClick={() => setSort((s) => nextSort(s, c))}>
+                    {c}
+                    <span className={active ? 'sort-icon on' : 'sort-icon'}>
+                      {active ? (sort.direction === 'asc' ? '↑' : '↓') : '↕'}
+                    </span>
+                  </button>
+                  {showFilters && (
+                    <ColumnFilter column={c} rows={rows}
+                      selected={columnFilters[c] || []}
+                      onChange={(values) => setColumnFilters((f) => ({ ...f, [c]: values }))} />
+                  )}
+                </span>
               </th>
             )
           })}
         </tr>
       </thead>
       <tbody>
-        {visible.map((r, i) => (
-          <tr key={i}>
-            {shown.map((c) => {
-              const tone = toneForCell(r, c, rules)
-              return (
-                <td key={c}
-                  className={[numericColumns.has(c) ? 'num' : '', tone ? `tone-${tone}` : '']
-                    .filter(Boolean).join(' ')}>
-                  {String(r[c] ?? '')}
-                </td>
-              )
-            })}
-          </tr>
-        ))}
+        {visible.map((r, i) => {
+          // clicking a row selects on the first non-numeric column, which is
+          // almost always the category you'd want to filter by
+          const keyColumn = opts.select_column
+            || shown.find((c) => !numericColumns.has(c)) || shown[0]
+          const rowSelected = isSelected(selection, keyColumn, r[keyColumn])
+          return (
+            <tr key={i}
+              className={[onSelect ? 'clickable' : '', rowSelected ? 'selected' : '']
+                .filter(Boolean).join(' ') || undefined}
+              onClick={onSelect ? () => onSelect(keyColumn, r[keyColumn]) : undefined}>
+              {shown.map((c) => {
+                const tone = toneForCell(r, c, rules)
+                return (
+                  <td key={c}
+                    className={[numericColumns.has(c) ? 'num' : '', tone ? `tone-${tone}` : '']
+                      .filter(Boolean).join(' ')}>
+                    {String(r[c] ?? '')}
+                  </td>
+                )
+              })}
+            </tr>
+          )
+        })}
       </tbody>
     </table>
   )
+
+  if (!showFilters) return table
+
+  return (
+    <div className="table-wrap">
+      <div className="table-toolbar no-export">
+        <Search size={13} />
+        <input className="table-search" value={search} placeholder="Search rows"
+          onChange={(e) => setSearch(e.target.value)} />
+        {isFiltering && (
+          <>
+            <span className="table-count">
+              {sorted.length.toLocaleString()} of {rows.length.toLocaleString()}
+            </span>
+            <button className="ghost small" onClick={clearAll}>Clear</button>
+          </>
+        )}
+      </div>
+      <div className="table-scroll">{table}</div>
+    </div>
+  )
 }
 
-function WidgetPlot({ widget, result }) {
+function WidgetPlot({ widget, result, selection, onSelect }) {
   const { rows, columns } = result
   const opts = widget.options || {}
+  // only pie/bar/table can raise a selection, and only when the parent is listening
+  const emits = Boolean(onSelect) && canEmitSelection(widget)
+  const select = (column, value) => {
+    if (emits) onSelect({ column, value, sourceId: widget.id })
+  }
 
   if (widget.type === 'stat') {
     const { field, value } = computeStat(rows, columns, opts)
@@ -262,7 +324,10 @@ function WidgetPlot({ widget, result }) {
   }
 
   if (widget.type === 'table') {
-    return <DataTable columns={columns} rows={rows} opts={opts} />
+    return (
+      <DataTable columns={columns} rows={rows} opts={opts}
+        selection={selection} onSelect={emits ? select : undefined} />
+    )
   }
 
   if (widget.type === 'pie') {
@@ -283,10 +348,20 @@ function WidgetPlot({ widget, result }) {
             data={pieData} dataKey="value" nameKey="name"
             innerRadius={donut ? '52%' : 0} outerRadius="76%" paddingAngle={2}
             isAnimationActive={false}
-            label={labelMode === 'none' ? false : (props) => renderSliceLabel(props, labelMode, total, opts)}
+            label={labelMode === 'none' ? false : (p) => renderSliceLabel(p, labelMode, total, opts)}
             labelLine={labelMode !== 'none'}
+            onClick={emits ? (entry) => select(catField, entry?.name) : undefined}
+            style={emits ? { cursor: 'pointer' } : undefined}
           >
-            {pieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} stroke="var(--surface)" />)}
+            {pieData.map((d, i) => {
+              const active = isSelected(selection, catField, d.name)
+              const dim = selection?.column === catField && !active
+              return (
+                <Cell key={i} fill={COLORS[i % COLORS.length]} stroke="var(--surface)"
+                  opacity={dim ? 0.3 : 1}
+                  strokeWidth={active ? 3 : 1} />
+              )
+            })}
           </Pie>
 
           {showTotal && (
@@ -318,9 +393,15 @@ function WidgetPlot({ widget, result }) {
   if (!yKeys.length) return <div className="muted" style={{ padding: 12, textAlign: 'center' }}>No numeric field to plot.</div>
 
   const ChartComp = widget.type === 'bar' ? BarChart : LineChart
+  const barsClickable = emits && widget.type === 'bar'
+
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <ChartComp data={chartRows}>
+      <ChartComp data={chartRows}
+        onClick={barsClickable
+          ? (e) => select(xKey, e?.activeLabel ?? e?.activePayload?.[0]?.payload?.[xKey])
+          : undefined}
+        style={barsClickable ? { cursor: 'pointer' } : undefined}>
         <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" />
         <XAxis dataKey={xKey} stroke="var(--muted)" fontSize={11} tickLine={false} />
         <YAxis stroke="var(--muted)" fontSize={11} tickLine={false} />
@@ -331,7 +412,15 @@ function WidgetPlot({ widget, result }) {
         {yKeys.length > 1 && <Legend />}
         {yKeys.map((k, i) =>
           widget.type === 'bar'
-            ? <Bar key={k} dataKey={k} fill={COLORS[i % COLORS.length]} />
+            ? (
+              <Bar key={k} dataKey={k} fill={COLORS[i % COLORS.length]}>
+                {barsClickable && chartRows.map((row, j) => {
+                  const active = isSelected(selection, xKey, row[xKey])
+                  const dim = selection?.column === xKey && !active
+                  return <Cell key={j} opacity={dim ? 0.35 : 1} />
+                })}
+              </Bar>
+            )
             : <Line key={k} dataKey={k} stroke={COLORS[i % COLORS.length]} dot={false} strokeWidth={2} />
         )}
       </ChartComp>

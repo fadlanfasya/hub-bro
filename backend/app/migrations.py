@@ -16,6 +16,7 @@ log = logging.getLogger("uvicorn.error")
 ADDED_COLUMNS = {
     "dashboards": {
         "share_token": "VARCHAR",
+        "version": "INTEGER DEFAULT 1",
     },
     "users": {
         "role": "VARCHAR DEFAULT 'viewer'",

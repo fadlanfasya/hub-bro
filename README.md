@@ -15,9 +15,11 @@ Unified dashboard platform MVP — connect data from APIs, monitoring tools, and
 - Drag-and-drop dashboard builder (12-column grid, auto-save). Widgets stay where you drop them, can be locked in place, and have a minimum size so charts stay readable
 - Widget types: line chart, bar chart, pie/donut, stat card, gauge, table, text/markdown
 - Stat widgets can show a trend against another column or the previous row
-- Tables sort on click and support conditional colouring
+- Tables sort on click, filter in place (search box plus per-column value pickers), and support conditional colouring
 - Unpivot turns wide `count(*) FILTER (…)` results into chartable rows
 - Per-dashboard themes (preset palettes or a custom accent), with an optional per-widget accent
+- Cross-filtering: click a pie slice, bar, or table row to filter the whole dashboard
+- Version history with restore, and a conflict warning when two editors overlap
 - Dashboard time range picker (15m → 30d); widgets can follow it or pin their own window
 - Export any widget as CSV or PNG, or the whole dashboard as a PNG
 - Per-widget auto refresh (10s → 15m), with backend response caching so several widgets on one source share a single upstream request
@@ -153,12 +155,13 @@ bash tests/test_integration.sh        # API, caching, transforms
 bash tests/test_glpi.sh               # pagination, filter pushdown, session recovery
 bash tests/test_sharing.sh            # sharing, duplication, access isolation
 bash tests/test_permissions.sh        # every role against every endpoint
+bash tests/test_history.sh            # snapshots, restore, concurrent edits
 bash tests/test_production.sh         # config guards, SPA serving, persistence
 ```
 
 ```bash
 cd frontend
-npm test                              # data shaping, tables, markdown, theme, grid (193 tests)
+npm test                              # data shaping, tables, theme, selection, grid (277 tests)
 ```
 
 The GLPI suites run against a mock GLPI server (`tests/mock_glpi.py`) — no real instance needed.
@@ -174,6 +177,7 @@ The GLPI suites run against a mock GLPI server (`tests/mock_glpi.py`) — no rea
 - Connectors that can filter server-side (GLPI, SQL) receive `filters` directly and report back anything they couldn't translate, which the transform layer then applies in Python.
 - `frontend/src/components/DashboardGrid.jsx` — gridstack wrapper. gridstack owns the item elements (it has to position them) and React renders each widget's content into them through a portal, so the two never fight over the same nodes. `float: true` is what stops widgets snapping upward.
 - `backend/app/static_files.py` — in production the API also serves the built frontend, with a fallback so client-side routes like `/dashboards/3` return the app while unknown `/api` paths still return a JSON 404.
+- `frontend/src/selection.js` — cross-filters are sent as `cross_filters`, which the backend treats as a transform. That keeps them out of the cache key, so clicking a slice re-filters cached data rather than re-querying the source. A cross-filter on a column a widget doesn't have is skipped, unlike a configured filter which would exclude every row.
 - `frontend/src/theme.js` — themes set only the accent and chart colours; surfaces and text stay on the app's tokens, and any accent is nudged until it clears 4.5:1 against the card background. That's why a theme can't make a dashboard unreadable.
 - `frontend/src/layout.js` — converts between the stored layout (`{i,x,y,w,h}`) and gridstack's (`{id,...}`), so dashboards saved before the grid migration keep working.
 - Dashboard definitions (widgets + grid layout) are stored as a JSON blob per dashboard.
@@ -187,6 +191,8 @@ If Redis is configured but unreachable, the app logs a warning and falls back to
 
 ## Known limits
 - Alert thresholds colour the widget but don't notify anywhere yet.
+- There's no rate limiting on login. Fine on a private network; add Cloudflare Access or similar before exposing the app publicly.
+- Version history keeps the last 30 snapshots per dashboard, and collapses saves made by the same person within two minutes.
 - GLPI fetches up to **Max rows** per widget (default 1000). Above that, a widget shows "Showing N of M" and its counts cover only the fetched rows.
 
 ## Next steps
