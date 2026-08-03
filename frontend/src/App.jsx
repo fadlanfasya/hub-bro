@@ -1,6 +1,6 @@
 import { Navigate, Route, Routes, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import {
-  LayoutDashboard, Database, LogOut, Sun, Moon, Users as UsersIcon, UserCircle,
+  LayoutDashboard, Database, LogOut, Sun, Moon, Users as UsersIcon, UserCircle, Activity,
 } from 'lucide-react'
 import Logo from './components/Logo'
 import Login from './pages/Login'
@@ -10,6 +10,7 @@ import DashboardEditor from './pages/DashboardEditor'
 import DataSources from './pages/DataSources'
 import PublicDashboard from './pages/PublicDashboard'
 import Users from './pages/Users'
+import Health from './pages/Health'
 import Account from './pages/Account'
 import { useTheme } from './useTheme'
 import { AuthProvider, useAuth, ROLE_LABELS } from './useAuth'
@@ -56,6 +57,11 @@ function Sidebar() {
         {can('datasource.view') && (
           <NavLink to="/datasources" className={navClass} title="Data sources">
             <Database size={16} />{!rail && <span>Data sources</span>}
+          </NavLink>
+        )}
+        {can('datasource.health') && (
+          <NavLink to="/health" className={navClass} title="Source health">
+            <Activity size={16} />{!rail && <span>Health</span>}
           </NavLink>
         )}
         {can('user.manage') && (
@@ -105,6 +111,9 @@ function AppRoutes() {
                 <Route path="/account" element={<Account />} />
                 <Route path="/datasources" element={
                   <RequireCapability capability="datasource.view"><DataSources /></RequireCapability>
+                } />
+                <Route path="/health" element={
+                  <RequireCapability capability="datasource.health"><Health /></RequireCapability>
                 } />
                 <Route path="/users" element={
                   <RequireCapability capability="user.manage"><Users /></RequireCapability>

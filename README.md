@@ -20,6 +20,7 @@ Unified dashboard platform MVP — connect data from APIs, monitoring tools, and
 - Per-dashboard themes (preset palettes or a custom accent), with an optional per-widget accent
 - Cross-filtering: click a pie slice, bar, or table row to filter the whole dashboard
 - Version history with restore, and a conflict warning when two editors overlap
+- Data source health page: reachability, response times, last error, and which dashboards depend on each source
 - Dashboard time range picker (15m → 30d); widgets can follow it or pin their own window
 - Export any widget as CSV or PNG, or the whole dashboard as a PNG
 - Per-widget auto refresh (10s → 15m), with backend response caching so several widgets on one source share a single upstream request
@@ -94,24 +95,71 @@ Users change their own password under **Account**; admins can reset anyone's fro
 
 ## Deploying with Docker
 
+The image is published as [`fadlanfasya/hub-bro`](https://hub.docker.com/r/fadlanfasya/hub-bro), so a server needs only `docker-compose.yml` and a `.env` — no source checkout.
+
 ```bash
 cp .env.example .env
 # set SECRET_KEY — generate one with:
 docker run --rm python:3.12-slim python -c "import secrets; print(secrets.token_urlsafe(48))"
 
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 ```
 
-The app is then on `http://<server>:8080` — frontend and API on a single port, no separate web server needed. Put nginx/IIS in front for TLS; the container already trusts `X-Forwarded-*`.
+The app is then on `http://<server>:8080` — frontend and API on a single port, no separate web server needed.
+
+### Adding nginx for TLS
+
+**nginx as a container**, alongside the app:
+
+```bash
+mkdir -p nginx/certs        # put fullchain.pem and privkey.pem here
+# set your hostname in nginx/hub-bro.conf, then comment out the
+# `ports:` block in docker-compose.yml so 8080 isn't reachable unencrypted
+docker compose -f docker-compose.yml -f docker-compose.nginx.yml up -d
+```
+
+**nginx already on the host**: copy `nginx/hub-bro.conf` into `/etc/nginx/sites-available/`, change the upstream to `server 127.0.0.1:8080;`, symlink it into `sites-enabled`, then `nginx -t && systemctl reload nginx`.
+
+Either way, set `CORS_ORIGINS=https://your-host` in `.env` — the address people actually type, or widgets load but fetch nothing.
+
+Three things the supplied config handles that a default one doesn't:
+
+- `client_max_body_size 64m` — nginx defaults to 1 MB and rejects CSV uploads with a 413 before the app sees them.
+- `proxy_read_timeout 120s` — a slow GLPI or SQL query otherwise hits nginx's 60s limit and returns 504.
+- `X-Forwarded-*` headers — the container runs with `--proxy-headers` and `TRUST_PROXY=true`, so these are what make client IPs and redirects correct.
 
 **Set `CORS_ORIGINS` in `.env`** to the address people actually type (including port), e.g. `http://dashboards.internal:8080`. Widgets will fail to load data if this doesn't match.
 
 Useful commands:
 
 ```bash
-docker compose logs -f          # follow logs
-docker compose ps               # health status
-docker compose up -d --build    # deploy an update
+docker compose logs -f                     # follow logs
+docker compose ps                          # health status
+docker compose pull && docker compose up -d   # deploy an update
+```
+
+### Building and publishing a new image
+
+```bash
+# build locally
+docker compose -f docker-compose.yml -f docker-compose.build.yml build
+
+# run your local build instead of the published one
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d
+
+# publish
+docker login
+docker push fadlanfasya/hub-bro:1.0
+```
+
+For a new release, bump the tag in both `docker-compose.yml` and `docker-compose.build.yml`, then build and push. Using a real version rather than `latest` means a server tells you exactly what it's running, and `docker compose pull` can't quietly change the app underneath you.
+
+**Note on architecture:** if you build on Windows/Mac (ARM or x86) and deploy to a different architecture, build multi-arch instead:
+
+```bash
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -t fadlanfasya/hub-bro:latest --push .
 ```
 
 **Data lives in the `hubbro-data` volume** — the SQLite database and uploaded CSVs. It survives rebuilds. Back it up:
@@ -156,6 +204,7 @@ bash tests/test_glpi.sh               # pagination, filter pushdown, session rec
 bash tests/test_sharing.sh            # sharing, duplication, access isolation
 bash tests/test_permissions.sh        # every role against every endpoint
 bash tests/test_history.sh            # snapshots, restore, concurrent edits
+bash tests/test_health.sh             # source probes, passive recording, permissions
 bash tests/test_production.sh         # config guards, SPA serving, persistence
 ```
 

@@ -18,12 +18,7 @@ router = APIRouter(prefix="/api/dashboards", tags=["dashboards"])
 
 # How many snapshots to keep per dashboard. Enough to undo a bad afternoon
 # without the table growing without bound.
-MAX_SNAPSHOTS = 30
-
-# Saves closer together than this replace the previous snapshot instead of
-# adding one. Layout auto-saves fire every ~600ms while dragging, which would
-# otherwise bury the useful history under dozens of near-identical entries.
-SNAPSHOT_DEBOUNCE_SECONDS = 120
+MAX_SNAPSHOTS = 50
 
 
 def _to_out(d: Dashboard) -> DashboardOut:
@@ -32,17 +27,21 @@ def _to_out(d: Dashboard) -> DashboardOut:
 
 
 def _snapshot(d: Dashboard, user: User, db: Session, note: str | None = None):
-    """Store the dashboard's current state before it gets overwritten."""
+    """Store the dashboard's current state before it gets overwritten.
+
+    Deduplicated by content, not by time. An earlier version debounced on a
+    timer, which meant two saves close together kept only the first — so a
+    layout you'd just built could be discarded before the save that broke it.
+    Skipping only byte-identical states means every distinct layout you have
+    ever had stays recoverable.
+    """
     latest = (db.query(DashboardSnapshot)
               .filter(DashboardSnapshot.dashboard_id == d.id)
               .order_by(DashboardSnapshot.id.desc()).first())
 
-    recent = (latest and latest.author_email == user.email and latest.created_at
-              and (datetime.utcnow() - latest.created_at).total_seconds()
-              < SNAPSHOT_DEBOUNCE_SECONDS)
-
-    if recent and not note:
-        return   # keep the older state; it's the more useful thing to restore
+    if latest and not note \
+            and latest.definition == d.definition and latest.name == d.name:
+        return   # nothing changed since the last snapshot
 
     db.add(DashboardSnapshot(
         dashboard_id=d.id, name=d.name, definition=d.definition,

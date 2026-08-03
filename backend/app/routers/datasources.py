@@ -5,10 +5,13 @@ import uuid
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
+from .. import health as health_mod
 from ..config import settings
 from ..database import get_db
 from ..models import DataSource, User
-from ..permissions import require_datasource_edit, require_datasource_view
+from ..permissions import (
+    require_datasource_edit, require_datasource_health, require_datasource_view,
+)
 from ..schemas import DataSourceCreate, DataSourceOut, DataSourceUpdate
 from ..secrets_store import encrypt_config, merge_masked
 
@@ -22,6 +25,37 @@ VALID_TYPES = {"rest", "csv", "prometheus", "glpi", "sql"}
 def _to_out(ds: DataSource) -> DataSourceOut:
     # never return real credentials to the client
     return DataSourceOut(id=ds.id, name=ds.name, type=ds.type, config=ds.safe_config_dict)
+
+
+@router.get("/health")
+def health(_: User = Depends(require_datasource_health), db: Session = Depends(get_db)):
+    """Reachability of every source. Deliberately exposes no configuration —
+    name, type and status only — so viewers can see it too."""
+    deps = health_mod.dependents(db)
+    out = []
+    for ds in db.query(DataSource).order_by(DataSource.id).all():
+        state = health_mod.status_for(db, ds.id)
+        out.append({
+            "id": ds.id, "name": ds.name, "type": ds.type,
+            "monitored": bool(ds.raw_config_dict.get("monitor")),
+            "dashboards": deps.get(ds.id, []),
+            **state,
+        })
+    return out
+
+
+@router.post("/{ds_id}/check")
+async def check_now(ds_id: int, _: User = Depends(require_datasource_health),
+                    db: Session = Depends(get_db)):
+    """Probe one source on demand."""
+    ds = db.query(DataSource).filter(DataSource.id == ds_id).first()
+    if not ds:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    ok, error, duration = await health_mod.probe(ds)
+    health_mod.record(db, ds.id, ok, error, duration, source="manual", force=True)
+    return {"ok": ok, "error": error, "duration_ms": duration,
+            **health_mod.status_for(db, ds.id)}
 
 
 @router.get("", response_model=list[DataSourceOut])

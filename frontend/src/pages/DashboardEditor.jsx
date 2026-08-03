@@ -5,6 +5,8 @@ import {
   Loader2, Copy, Share2, Lock, Unlock, Eye, Palette, Filter, History, AlertCircle,
 } from 'lucide-react'
 import HistoryModal from '../components/HistoryModal'
+import WidgetLink from '../components/WidgetLink'
+import EditableTitle from '../components/EditableTitle'
 import { describeSelection, toggleSelection } from '../selection'
 import { FileText, Image } from 'lucide-react'
 import ShareModal from '../components/ShareModal'
@@ -17,7 +19,9 @@ import ExportMenu from '../components/ExportMenu'
 import { dashboards, datasources, data as dataApi } from '../api'
 import WidgetRenderer, { DataBadge } from '../components/WidgetRenderer'
 import WidgetConfigModal from '../components/WidgetConfigModal'
-import { layoutsEqual, minSizeFor, nextSlot, toGridItems, toStoredLayout } from '../layout'
+import {
+  layoutsEqual, minSizeFor, nextSlot, toGridItems, toStoredLayout, widgetClass,
+} from '../layout'
 import { downloadCsv, downloadPng } from '../export'
 import { DEFAULT_RANGE, RANGES } from '../timeRange'
 import { useAuth } from '../useAuth'
@@ -38,6 +42,7 @@ export default function DashboardEditor() {
   const [themeOpen, setThemeOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [conflict, setConflict] = useState(null)
+  const [allDashboards, setAllDashboards] = useState([])
   // transient cross-filter from clicking a slice/bar/row — never persisted
   const [selection, setSelection] = useState(null)
 
@@ -56,7 +61,11 @@ export default function DashboardEditor() {
       versionRef.current = res.data.version
     })
     // viewers can't list data sources; they don't need them since they can't edit
-    if (canEdit) datasources.list().then((res) => setSources(res.data)).catch(() => {})
+    if (canEdit) {
+      datasources.list().then((res) => setSources(res.data)).catch(() => {})
+      // for the "link to another dashboard" picker
+      dashboards.list().then((res) => setAllDashboards(res.data)).catch(() => {})
+    }
   }, [id, canEdit])
 
   // manual refresh must bypass the backend cache, so drop the cached responses
@@ -85,6 +94,21 @@ export default function DashboardEditor() {
       }
     }, 600)
   }, [id])
+
+  /** A rename goes through the same conflict check as any other save. */
+  const renameDashboard = async (name) => {
+    setSaving(true)
+    try {
+      const res = await dashboards.update(id, { name, version: versionRef.current })
+      versionRef.current = res.data.version
+      setDashboard((d) => ({ ...d, name: res.data.name }))
+      setConflict(null)
+    } catch (err) {
+      setConflict(err.response?.data?.detail || 'Could not rename')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const updateDefinition = (updater) => {
     setDashboard((d) => {
@@ -227,12 +251,13 @@ export default function DashboardEditor() {
   const renderWidget = (item) => {
     const w = item.widget
     return (
-      <div className={item.locked ? 'widget locked' : 'widget'} data-widget-id={w.id}
-        style={widgetAccentVars(w.options?.accent, theme)}>
+      <div className={widgetClass(w, item.locked)} data-widget-id={w.id}
+        style={widgetAccentVars(w.options?.accent, theme, w.options?.widget_bg)}>
         <div className={canEdit ? 'widget-header' : 'widget-header static'}
           title={canEdit ? (item.locked ? 'Locked — unlock to move' : 'Drag to move') : undefined}>
           {canEdit && <span className="grip"><GripVertical size={14} /></span>}
           <span className="title">{w.title}</span>
+          <WidgetLink url={w.options?.link} label={w.options?.link_label} />
           <DataBadge meta={statuses[w.id]?.meta} stale={statuses[w.id]?.stale} />
           <span className="actions widget-actions">
             <ExportMenu compact actions={widgetExports(w)} label="Export widget" />
@@ -278,7 +303,9 @@ export default function DashboardEditor() {
           onClick={() => navigate('/')}>
           <ChevronLeft size={16} />
         </button>
-        <h1>{dashboard.name}</h1>
+        <h1>
+          <EditableTitle value={dashboard.name} disabled={!canEdit} onSave={renameDashboard} />
+        </h1>
         {!canEdit ? (
           <span className="status-pill"><Eye size={11} /> Read-only</span>
         ) : conflict ? (
@@ -411,6 +438,8 @@ export default function DashboardEditor() {
           <WidgetConfigModal
             widget={modal.widget}
             sources={sources}
+            dashboardList={allDashboards}
+            currentDashboardId={Number(id)}
             onSave={saveWidget}
             onClose={() => setModal(null)}
           />

@@ -4,7 +4,9 @@ import {
 } from 'lucide-react'
 import { TONES } from '../tableRules'
 
-export default function WidgetConfigModal({ widget, sources, onSave, onClose }) {
+export default function WidgetConfigModal({
+  widget, sources, onSave, onClose, dashboardList = [], currentDashboardId,
+}) {
   const [title, setTitle] = useState(widget?.title || '')
   const [type, setType] = useState(widget?.type || 'line')
   const [datasourceId, setDatasourceId] = useState(widget?.datasource_id || sources[0]?.id || '')
@@ -19,6 +21,10 @@ export default function WidgetConfigModal({ widget, sources, onSave, onClose }) 
     widget?.options?.filters?.length
       ? widget.options.filters
       : [{ column: '', op: 'eq', value: '' }]
+  )
+  const [columnLinksText, setColumnLinksText] = useState(
+    Object.entries(widget?.options?.column_links || {})
+      .map(([col, url]) => `${col} = ${url}`).join('\n')
   )
   const [unpivotText, setUnpivotText] = useState(
     (widget?.options?.unpivot?.columns || []).join(', ')
@@ -72,7 +78,21 @@ export default function WidgetConfigModal({ widget, sources, onSave, onClose }) 
     if (!opts.pie_style || opts.pie_style === 'donut') delete opts.pie_style
     if (opts.pie_center !== false) delete opts.pie_center
     if (!opts.pie_center_label) delete opts.pie_center_label
-    if (!opts.accent) delete opts.accent
+    const links = {}
+    for (const line of columnLinksText.split('\n')) {
+      const idx = line.indexOf('=')
+      if (idx <= 0) continue
+      const column = line.slice(0, idx).trim()
+      const url = line.slice(idx + 1).trim()
+      if (column && url) links[column] = url
+    }
+    if (Object.keys(links).length) opts.column_links = links
+    else delete opts.column_links
+
+    if (!opts.link || opts.link === 'https://') { delete opts.link; delete opts.link_label }
+    if (!opts.link_label) delete opts.link_label
+    if (!opts.accent) { delete opts.accent; delete opts.widget_bg }
+    if (!opts.widget_bg || opts.widget_bg === 'none') delete opts.widget_bg
     if (opts.show_filters !== false) delete opts.show_filters   // shown by default
     if (!opts.align || opts.align === 'left') delete opts.align
     // vertical default differs by type: a stat sits centred, text starts at the top
@@ -424,7 +444,14 @@ export default function WidgetConfigModal({ widget, sources, onSave, onClose }) 
                   onChange={(e) => setOpt('unit', e.target.value)} />
               </div>
             </div>
-            <p className="hint">The gauge uses the same value field, aggregate and thresholds as a stat widget.</p>
+            <p className="hint">The scale sets where the arc starts and ends.</p>
+            <label>Label <span className="optional">(blank uses the field name, empty hides it)</span></label>
+            <input value={opts.label ?? ''} placeholder={opts.value_field || 'field name'}
+              onChange={(e) => setOpt('label', e.target.value)} />
+            <p className="hint">
+              Thresholds, number formatting and the value field are set below —
+              the same controls a stat widget uses.
+            </p>
           </>
         )}
 
@@ -456,37 +483,6 @@ export default function WidgetConfigModal({ widget, sources, onSave, onClose }) 
                 <option value="middle">Middle</option>
                 <option value="bottom">Bottom</option>
               </select>
-            </div>
-
-            <label>Number format</label>
-            <div className="field-row">
-              <div style={{ flex: 1 }}>
-                <input value={opts.prefix || ''} placeholder="Prefix  e.g. Rp"
-                  onChange={(e) => setOpt('prefix', e.target.value)} />
-              </div>
-              <div style={{ flex: 1 }}>
-                <input value={opts.suffix || ''} placeholder="Suffix  e.g. ms"
-                  onChange={(e) => setOpt('suffix', e.target.value)} />
-              </div>
-              <div style={{ width: 110 }}>
-                <input type="number" min="0" max="6" value={opts.decimals ?? ''}
-                  placeholder="Decimals"
-                  onChange={(e) => setOpt('decimals', e.target.value)} />
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 18, marginTop: 10, flexWrap: 'wrap' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 7, margin: 0 }}>
-                <input type="checkbox" style={{ width: 'auto' }}
-                  checked={opts.thousands !== false}
-                  onChange={(e) => setOpt('thousands', e.target.checked)} />
-                Thousands separator
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 7, margin: 0 }}>
-                <input type="checkbox" style={{ width: 'auto' }}
-                  checked={Boolean(opts.compact)}
-                  onChange={(e) => setOpt('compact', e.target.checked)} />
-                Compact (1.2M)
-              </label>
             </div>
 
             <label>Value size <span className="optional">(px, blank = default)</span></label>
@@ -550,7 +546,42 @@ export default function WidgetConfigModal({ widget, sources, onSave, onClose }) 
               <input type="number" placeholder="Critical at" value={opts.thresholds?.critical ?? ''}
                 onChange={(e) => setOpt('thresholds', { ...(opts.thresholds || {}), critical: e.target.value })} />
             </div>
-            <p className="hint">Colours the number and shows a badge when breached.</p>
+            <p className="hint">
+              {type === 'gauge'
+                ? 'Colours the arc and marks where each threshold sits on the scale.'
+                : 'Colours the number and shows a badge when breached.'}
+            </p>
+
+            <label>Number format</label>
+            <div className="field-row">
+              <div style={{ flex: 1 }}>
+                <input value={opts.prefix || ''} placeholder="Prefix  e.g. Rp"
+                  onChange={(e) => setOpt('prefix', e.target.value)} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <input value={opts.suffix || ''} placeholder="Suffix  e.g. ms"
+                  onChange={(e) => setOpt('suffix', e.target.value)} />
+              </div>
+              <div style={{ width: 110 }}>
+                <input type="number" min="0" max="6" value={opts.decimals ?? ''}
+                  placeholder="Decimals"
+                  onChange={(e) => setOpt('decimals', e.target.value)} />
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 18, marginTop: 10, flexWrap: 'wrap' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 7, margin: 0 }}>
+                <input type="checkbox" style={{ width: 'auto' }}
+                  checked={opts.thousands !== false}
+                  onChange={(e) => setOpt('thousands', e.target.checked)} />
+                Thousands separator
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 7, margin: 0 }}>
+                <input type="checkbox" style={{ width: 'auto' }}
+                  checked={Boolean(opts.compact)}
+                  onChange={(e) => setOpt('compact', e.target.checked)} />
+                Compact (1.2M)
+              </label>
+            </div>
 
             <label>Aggregate</label>
             <select value={opts.aggregate || 'last'} onChange={(e) => setOpt('aggregate', e.target.value)}>
@@ -562,8 +593,50 @@ export default function WidgetConfigModal({ widget, sources, onSave, onClose }) 
           </>
         )}
 
+        {type === 'table' && (
+          <>
+            <label>Link columns <span className="optional">(one per line: column = url)</span></label>
+            <textarea rows={3} value={columnLinksText}
+              onChange={(e) => setColumnLinksText(e.target.value)}
+              style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5 }}
+              placeholder={'ticket_id = https://helpdesk.internal/ticket/{ticket_id}\nname = /dashboards/3'} />
+            <p className="hint">
+              Use <code>{'{column}'}</code> to insert a value from the row. Values are
+              URL-encoded. A row missing that value shows plain text instead of a broken link.
+            </p>
+          </>
+        )}
+
         {type !== 'text' && (
           <>
+            <label>Header link <span className="optional">(optional)</span></label>
+            <div className="field-row">
+              <select style={{ width: 150 }}
+                value={opts.link && !opts.link.startsWith('/dashboards/') ? 'url' : 'dashboard'}
+                onChange={(e) => setOpt('link', e.target.value === 'url' ? 'https://' : '')}>
+                <option value="dashboard">Another dashboard</option>
+                <option value="url">External link</option>
+              </select>
+              {(!opts.link || opts.link.startsWith('/dashboards/')) ? (
+                <select value={opts.link || ''} onChange={(e) => setOpt('link', e.target.value)}>
+                  <option value="">— none —</option>
+                  {dashboardList.filter((d) => d.id !== currentDashboardId).map((d) => (
+                    <option key={d.id} value={`/dashboards/${d.id}`}>{d.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <input value={opts.link} placeholder="https://wiki.internal/runbook"
+                  onChange={(e) => setOpt('link', e.target.value)} />
+              )}
+            </div>
+            {opts.link && (
+              <>
+                <label>Link text</label>
+                <input value={opts.link_label || ''} placeholder="Open"
+                  onChange={(e) => setOpt('link_label', e.target.value)} />
+              </>
+            )}
+
             <label>Accent colour <span className="optional">(overrides the dashboard theme)</span></label>
             <div className="field-row">
               <input type="color" style={{ width: 52, padding: 3, height: 38 }}
@@ -576,7 +649,32 @@ export default function WidgetConfigModal({ widget, sources, onSave, onClose }) 
                   onClick={() => setOpt('accent', '')}>Clear</button>
               )}
             </div>
-            <p className="hint">Useful for making one critical number stand out.</p>
+
+            {opts.accent && ['stat', 'gauge', 'text'].includes(type) && (
+              <>
+                <label>Apply it to</label>
+                <select value={opts.widget_bg || 'none'}
+                  onChange={(e) => setOpt('widget_bg', e.target.value)}>
+                  <option value="none">The value only</option>
+                  <option value="soft">Tinted card background</option>
+                  <option value="solid">Filled card background</option>
+                </select>
+                <p className="hint">
+                  {opts.widget_bg === 'solid'
+                    ? 'Text flips to white or black automatically, whichever reads better on your colour.'
+                    : 'A filled card makes one number readable from across the room.'}
+                </p>
+              </>
+            )}
+            {opts.accent && !['stat', 'gauge', 'text'].includes(type) && (
+              <p className="hint">
+                Coloured backgrounds are limited to stat, gauge and text widgets —
+                a fill behind a chart or table hurts readability.
+              </p>
+            )}
+            {!opts.accent && (
+              <p className="hint">Useful for making one critical number stand out.</p>
+            )}
           </>
         )}
 

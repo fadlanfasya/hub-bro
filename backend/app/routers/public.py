@@ -68,4 +68,4 @@ async def fetch_public_data(token: str, payload: PublicFetchRequest,
     if not ds:
         raise HTTPException(status_code=404, detail="Data source not found")
 
-    return await _run(ds, widget.get("options") or {})
+    return await _run(ds, widget.get("options") or {}, db)

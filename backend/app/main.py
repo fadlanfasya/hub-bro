@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import sys
 
@@ -61,6 +62,29 @@ app.include_router(public.router)
 def health():
     from . import cache
     return {"status": "ok", "env": settings.ENV, "cache": cache.backend_name()}
+
+
+@app.on_event("startup")
+async def start_health_monitor():
+    """Probe monitored data sources on a timer.
+
+    Only sources with `monitor: true` are checked, so this stays idle until you
+    opt one in — enabling it never starts hammering every connected database.
+    """
+    if settings.HEALTH_CHECK_INTERVAL <= 0:
+        return
+    from . import health as health_mod
+    from .database import SessionLocal
+    app.state.health_task = asyncio.create_task(
+        health_mod.monitor_loop(SessionLocal, settings.HEALTH_CHECK_INTERVAL)
+    )
+
+
+@app.on_event("shutdown")
+async def stop_health_monitor():
+    task = getattr(app.state, "health_task", None)
+    if task:
+        task.cancel()
 
 
 # Must come last: the SPA fallback claims every unmatched non-/api route.

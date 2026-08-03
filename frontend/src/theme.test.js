@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_PRESET, PRESETS, contrastRatio, ensureReadable, isDefaultTheme,
-  isValidHex, luminance, normaliseHex, resolveTheme, shift, themeToCssVars,
+  isValidHex, luminance, normaliseHex, onColor, resolveTheme, shift, themeToCssVars,
   widgetAccentVars, withAlpha,
 } from './theme'
 
@@ -180,6 +180,58 @@ describe('widgetAccentVars', () => {
   it('keeps a widget accent readable too', () => {
     const vars = widgetAccentVars('#fffde0', 'light')
     expect(contrastRatio(vars['--primary'], LIGHT_SURFACE)).toBeGreaterThanOrEqual(4.5)
+  })
+})
+
+describe('onColor', () => {
+  it('picks white on dark fills and black on light ones', () => {
+    expect(onColor('#00694a')).toBe('#ffffff')
+    expect(onColor('#111418')).toBe('#ffffff')
+    expect(onColor('#fde047')).toBe('#111418')
+    expect(onColor('#ffffff')).toBe('#111418')
+  })
+
+  it('always returns a readable pairing', () => {
+    for (const fill of ['#00694a', '#e9b452', '#6d28d9', '#fde047', '#334155', '#f85149']) {
+      expect(contrastRatio(onColor(fill), fill), fill).toBeGreaterThanOrEqual(4.5)
+    }
+  })
+})
+
+describe('widgetAccentVars backgrounds', () => {
+  it('sets no background by default', () => {
+    const vars = widgetAccentVars('#00694a', 'light')
+    expect(vars).not.toHaveProperty('--widget-bg')
+  })
+
+  it('tints the card in soft mode', () => {
+    const vars = widgetAccentVars('#00694a', 'light', 'soft')
+    expect(vars['--widget-bg']).toContain('rgba')
+    expect(vars).not.toHaveProperty('--widget-ink')   // text stays as normal
+  })
+
+  it('fills the card and flips the text in solid mode', () => {
+    const vars = widgetAccentVars('#00694a', 'light', 'solid')
+    expect(vars['--widget-bg']).toBe('#00694a')
+    expect(vars['--widget-ink']).toBe('#ffffff')
+  })
+
+  it('uses dark text on a pale solid fill', () => {
+    const vars = widgetAccentVars('#fde047', 'light', 'solid')
+    expect(vars['--widget-ink']).toBe('#111418')
+    expect(contrastRatio(vars['--widget-ink'], vars['--widget-bg']))
+      .toBeGreaterThanOrEqual(4.5)
+  })
+
+  it('honours the chosen colour on a solid fill rather than correcting it', () => {
+    // on a filled card it's the text that adapts, so a pale accent stays pale
+    expect(widgetAccentVars('#fde047', 'light', 'solid')['--widget-bg']).toBe('#fde047')
+    // but as a value colour on white it still gets darkened to stay readable
+    expect(widgetAccentVars('#fde047', 'light')['--primary']).not.toBe('#fde047')
+  })
+
+  it('returns undefined without an accent, whatever the background', () => {
+    expect(widgetAccentVars('', 'light', 'solid')).toBeUndefined()
   })
 })
 

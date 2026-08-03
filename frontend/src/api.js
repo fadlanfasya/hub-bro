@@ -43,6 +43,9 @@ export const users = {
 
 export const datasources = {
   list: () => api.get('/datasources'),
+  // readable by every role — exposes status only, never configuration
+  health: () => api.get('/datasources/health'),
+  check: (id) => api.post(`/datasources/${id}/check`),
   create: (payload) => api.post('/datasources', payload),
   update: (id, payload) => api.put(`/datasources/${id}`, payload),
   uploadCsv: (name, file) => {

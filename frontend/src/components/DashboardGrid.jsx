@@ -63,10 +63,18 @@ export default function DashboardGrid({
       }))
       onChangeRef.current(layout)
     }
-    grid.on('change', emit)
+
+    // Deliberately NOT the 'change' event: that also fires when gridstack
+    // repositions items itself — on mount, when the container is measured, or
+    // when resolving an overlap. Persisting those would let merely opening the
+    // dashboard in a second tab or a narrower window save a rearranged layout
+    // over the real one. Only a finished drag or resize is a real user intent.
+    grid.on('dragstop', emit)
+    grid.on('resizestop', emit)
 
     return () => {
-      grid.off('change')
+      grid.off('dragstop')
+      grid.off('resizestop')
       grid.destroy(false)          // keep the DOM; React still owns the portals
       gridRef.current = null
       nodesRef.current.clear()
@@ -93,9 +101,15 @@ export default function DashboardGrid({
       }
     }
 
-    // add widgets that are new
-    for (const [id, item] of wanted) {
-      if (nodesRef.current.has(id)) continue
+    // Add new widgets top-to-bottom, left-to-right. Inserting a widget that
+    // sits lower on the page before one above it makes gridstack resolve a
+    // collision and shove things around — the saved layout would then render
+    // rearranged.
+    const additions = [...wanted.entries()]
+      .filter(([id]) => !nodesRef.current.has(id))
+      .sort(([, a], [, b]) => (a.y - b.y) || (a.x - b.x))
+
+    for (const [id, item] of additions) {
       const el = grid.addWidget({
         id,
         x: item.x, y: item.y, w: item.w, h: item.h,
@@ -107,7 +121,13 @@ export default function DashboardGrid({
         content: '',
       })
       const contentEl = el.querySelector('.grid-stack-item-content')
-      nodesRef.current.set(id, { el, contentEl })
+      // set here as well as in the sync effect below, which now only runs when
+      // something changes — a widget created already locked never changes
+      el.classList.toggle('is-locked', Boolean(item.locked))
+      nodesRef.current.set(id, {
+        el, contentEl, locked: Boolean(item.locked),
+        x: item.x, y: item.y, w: item.w, h: item.h,
+      })
       changed = true
     }
 
@@ -120,17 +140,41 @@ export default function DashboardGrid({
     const grid = gridRef.current
     if (!grid) return
 
-    grid.batchUpdate()
+    // Only touch gridstack when something actually differs. Calling update()
+    // on every render re-runs the layout engine, and a re-render happens on
+    // every data refresh — enough to nudge widgets out of place over time.
+    const pending = []
     for (const item of items) {
       const node = nodesRef.current.get(String(item.id))
       if (!node) continue
+
       const locked = Boolean(item.locked)
-      grid.update(node.el, {
+      const lockChanged = node.locked !== locked
+      const movedExternally = node.x !== item.x || node.y !== item.y
+        || node.w !== item.w || node.h !== item.h
+
+      if (lockChanged || movedExternally) {
+        pending.push({ node, item, locked, movedExternally })
+      }
+    }
+    if (!pending.length) return
+
+    grid.batchUpdate()
+    for (const { node, item, locked, movedExternally } of pending) {
+      const update = {
         locked,
         noMove: readOnly || locked,
         noResize: readOnly || locked,
-      })
+      }
+      // Restate the geometry whenever it changed upstream — a restore from
+      // history, for instance. Passing it explicitly stops gridstack choosing
+      // its own position.
+      if (movedExternally) {
+        Object.assign(update, { x: item.x, y: item.y, w: item.w, h: item.h })
+      }
+      grid.update(node.el, update)
       node.el.classList.toggle('is-locked', locked)
+      Object.assign(node, { locked, x: item.x, y: item.y, w: item.w, h: item.h })
     }
     grid.batchUpdate(false)
   }, [items, readOnly])

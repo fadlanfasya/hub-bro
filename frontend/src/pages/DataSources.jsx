@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Globe, FileSpreadsheet, Activity, Server, Table2, X, Plus, Database, Loader2, CheckCircle2, XCircle, Pencil, Trash2, Info } from 'lucide-react'
 import { datasources, data } from '../api'
+import SecretField from '../components/SecretField'
 import { useAuth } from '../useAuth'
 
 const TYPE_LABELS = {
@@ -32,10 +33,12 @@ export default function DataSources() {
   const [headerRows, setHeaderRows] = useState([{ key: '', value: '' }])
   const [baseUrl, setBaseUrl] = useState('')
   const [verifySsl, setVerifySsl] = useState(true)
-  const [appToken, setAppToken] = useState('')
-  const [userToken, setUserToken] = useState('')
-  const [sql, setSql] = useState({ driver: 'postgresql', host: '', port: '', database: '', user: '', password: '' })
-  const [hasStoredPassword, setHasStoredPassword] = useState(false)
+  const [sql, setSql] = useState({ driver: 'postgresql', host: '', port: '', database: '', user: '' })
+  // secrets: null means "untouched, keep whatever is stored"; a string is a new value
+  const [secrets, setSecrets] = useState({ password: '', app_token: '', user_token: '' })
+  const [stored, setStored] = useState({})
+  const setSecret = (k, v) => setSecrets((s2) => ({ ...s2, [k]: v }))
+  const [monitor, setMonitor] = useState(false)
   const setSqlField = (k, v) => setSql((s) => ({ ...s, [k]: v }))
   const [file, setFile] = useState(null)
   const [error, setError] = useState('')
@@ -50,9 +53,10 @@ export default function DataSources() {
     setEditingId(null)
     setName(''); setUrl(''); setHeaderRows([{ key: '', value: '' }])
     setBaseUrl(''); setFile(null); setVerifySsl(true); setError('')
-    setAppToken(''); setUserToken('')
-    setSql({ driver: 'postgresql', host: '', port: '', database: '', user: '', password: '' })
-    setHasStoredPassword(false)
+    setSql({ driver: 'postgresql', host: '', port: '', database: '', user: '' })
+    setSecrets({ password: '', app_token: '', user_token: '' })
+    setStored({})
+    setMonitor(false)
   }
 
   const startEdit = (ds) => {
@@ -62,18 +66,20 @@ export default function DataSources() {
     setUrl(ds.config.url || '')
     setBaseUrl(ds.config.base_url || '')
     setVerifySsl(ds.config.verify_ssl !== false)
-    // secrets arrive masked; leaving them untouched keeps the stored value
-    setAppToken(ds.config.app_token || '')
-    setUserToken(ds.config.user_token || '')
     setSql({
       driver: ds.config.driver || 'postgresql',
       host: ds.config.host || '', port: ds.config.port || '',
       database: ds.config.database || '', user: ds.config.user || '',
-      // start blank rather than prefilling the mask: blank now means
-      // "keep the stored password", so an edit can't silently wipe it
-      password: '',
     })
-    setHasStoredPassword(Boolean(ds.config.password))
+    // the API only ever sends a mask for secrets, so record which ones exist
+    // and start them untouched — nothing to retype
+    setStored({
+      password: Boolean(ds.config.password),
+      app_token: Boolean(ds.config.app_token),
+      user_token: Boolean(ds.config.user_token),
+    })
+    setSecrets({ password: null, app_token: null, user_token: null })
+    setMonitor(Boolean(ds.config.monitor))
     const rows = Object.entries(ds.config.headers || {}).map(([key, value]) => ({ key, value }))
     setHeaderRows(rows.length ? rows : [{ key: '', value: '' }])
     setFile(null)
@@ -81,23 +87,28 @@ export default function DataSources() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
+  // an untouched secret is sent back as the mask, which tells the server to
+  // keep the value it already has
+  const secretValue = (key) => (secrets[key] === null ? MASK : secrets[key])
+
   const buildConfig = () => {
     if (type === 'rest') {
       const parsedHeaders = {}
       for (const row of headerRows) {
         if (row.key.trim()) parsedHeaders[row.key.trim()] = row.value
       }
-      return { url, headers: parsedHeaders, verify_ssl: verifySsl }
+      return { url, headers: parsedHeaders, verify_ssl: verifySsl, monitor }
     }
-    if (type === 'prometheus') return { base_url: baseUrl }
+    if (type === 'prometheus') return { base_url: baseUrl, monitor }
     if (type === 'glpi') {
-      return { base_url: baseUrl, app_token: appToken, user_token: userToken, verify_ssl: verifySsl }
+      return {
+        base_url: baseUrl,
+        app_token: secretValue('app_token'),
+        user_token: secretValue('user_token'),
+        verify_ssl: verifySsl, monitor,
+      }
     }
-    if (type === 'sql') {
-      // sending the mask tells the backend to keep whatever is already stored
-      const password = (editingId && !sql.password && hasStoredPassword) ? MASK : sql.password
-      return { ...sql, password }
-    }
+    if (type === 'sql') return { ...sql, password: secretValue('password'), monitor }
     return {}
   }
 
@@ -215,13 +226,15 @@ export default function DataSources() {
               <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} required
                 placeholder="http://10.1.6.51/glpi/apirest.php" />
               <p className="hint">The apirest.php endpoint, not the web UI URL.</p>
-              <label>App-Token</label>
-              <input value={appToken} onChange={(e) => setAppToken(e.target.value)}
+              <SecretField label="App-Token"
+                value={secrets.app_token} hasStored={stored.app_token}
+                onChange={(v) => setSecret('app_token', v)}
                 placeholder="Setup → General → API → API client" />
-              <label>User API token</label>
-              <input value={userToken} onChange={(e) => setUserToken(e.target.value)} required
-                placeholder="Preferences → Remote access keys" />
-              <p className="hint">Hub-Bro opens and refreshes the GLPI session for you.</p>
+              <SecretField label="User API token" required
+                value={secrets.user_token} hasStored={stored.user_token}
+                onChange={(v) => setSecret('user_token', v)}
+                placeholder="Preferences → Remote access keys"
+                hint="Hub-Bro opens and refreshes the GLPI session for you." />
               <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer' }}>
                 <input type="checkbox" style={{ width: 'auto', marginTop: 2 }} checked={verifySsl}
                   onChange={(e) => setVerifySsl(e.target.checked)} />
@@ -270,15 +283,10 @@ export default function DataSources() {
                   <label>User</label>
                   <input value={sql.user} onChange={(e) => setSqlField('user', e.target.value)}
                     placeholder="readonly_user" />
-                  <label>Password</label>
-                  <input type="password" value={sql.password} autoComplete="new-password"
-                    onChange={(e) => setSqlField('password', e.target.value)}
-                    placeholder={hasStoredPassword ? 'Leave blank to keep the current password' : ''} />
-                  {!editingId && !sql.password && (
-                    <p className="hint" style={{ color: 'var(--danger)' }}>
-                      PostgreSQL, MySQL and Doris reject connections without a password
-                      unless the server is set to trust auth.
-                    </p>
+                  <SecretField label="Password" required
+                    value={secrets.password} hasStored={stored.password}
+                    onChange={(v) => setSecret('password', v)}
+                    hint="Stored encrypted. Use a read-only account — Hub-Bro rejects anything but SELECT, but least privilege is still the right call." />
                   )}
                   <p className="hint">
                     Stored encrypted. Use a read-only account — Hub-Bro rejects anything but SELECT,
@@ -296,6 +304,18 @@ export default function DataSources() {
           )}
           {type === 'csv' && editingId && (
             <p className="muted">Only the name can be changed for CSV sources. To change the data, delete and re-upload.</p>
+          )}
+          {type !== 'csv' && (
+            <>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer' }}>
+                <input type="checkbox" style={{ width: 'auto', marginTop: 2 }} checked={monitor}
+                  onChange={(e) => setMonitor(e.target.checked)} />
+                <span>
+                  Check this source on a timer
+                  <span className="optional"> — otherwise health is only known from real widget fetches</span>
+                </span>
+              </label>
+            </>
           )}
           {error && <div className="error"><XCircle size={14} />{error}</div>}
           <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>

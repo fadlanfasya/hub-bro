@@ -4,11 +4,12 @@ import { AlertCircle, RefreshCw } from 'lucide-react'
 import Logo from '../components/Logo'
 import DashboardGrid from '../components/DashboardGrid'
 import ThemeScope from '../components/ThemeScope'
+import WidgetLink from '../components/WidgetLink'
 import { widgetAccentVars } from '../theme'
 import { useTheme } from '../useTheme'
 import WidgetRenderer, { DataBadge } from '../components/WidgetRenderer'
 import { publicApi } from '../api'
-import { toGridItems } from '../layout'
+import { toGridItems, widgetClass } from '../layout'
 
 /**
  * Read-only view of a shared dashboard. No auth, no editing.
@@ -84,9 +85,13 @@ export default function PublicDashboard() {
           items={toGridItems(widgets, layout)}
           readOnly
           renderItem={(item) => (
-            <div className="widget" style={widgetAccentVars(item.widget.options?.accent, mode)}>
+            <div className={widgetClass(item.widget, false)}
+              style={widgetAccentVars(item.widget.options?.accent, mode,
+                item.widget.options?.widget_bg)}>
               <div className="widget-header static">
                 <span className="title">{item.widget.title}</span>
+                <WidgetLink url={item.widget.options?.link}
+                  label={item.widget.options?.link_label} />
                 <DataBadge meta={statuses[item.widget.id]?.meta}
                   stale={statuses[item.widget.id]?.stale} />
               </div>

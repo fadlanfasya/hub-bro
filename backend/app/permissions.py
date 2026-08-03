@@ -48,6 +48,10 @@ MATRIX = {
     "dashboard.share": {ADMIN, EDITOR},
     "datasource.view": {ADMIN, EDITOR},
     "datasource.edit": {ADMIN},
+    # Everyone can see whether a source is reachable. It exposes no config —
+    # just a name and a status — and "is this dashboard stale?" is exactly what
+    # a viewer needs to know before quoting a number.
+    "datasource.health": {ADMIN, EDITOR, VIEWER},
     "user.manage": {ADMIN},
 }
 
@@ -77,4 +81,5 @@ def require(capability: str):
 require_admin = require("user.manage")
 require_dashboard_edit = require("dashboard.edit")
 require_datasource_view = require("datasource.view")
+require_datasource_health = require("datasource.health")
 require_datasource_edit = require("datasource.edit")

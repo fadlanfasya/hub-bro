@@ -84,6 +84,13 @@ describe('widget options do not break rendering', () => {
       options: { color_rules: [{ column: 'status', op: 'eq', value: 'gagal', tone: 'bad' }] },
     }],
     ['gauge with a scale', { type: 'gauge', options: { gauge_min: 0, gauge_max: 50000 } }],
+    ['gauge with thresholds and formatting', {
+      type: 'gauge',
+      options: {
+        value_field: 'total', gauge_min: 0, gauge_max: 100, unit: '%',
+        decimals: 1, thresholds: { direction: 'above', warn: 70, critical: 90 },
+      },
+    }],
   ]
 
   for (const [label, widget] of cases) {
@@ -92,6 +99,105 @@ describe('widget options do not break rendering', () => {
       expect(container.innerHTML.length).toBeGreaterThan(0)
     })
   }
+})
+
+describe('table cell links', () => {
+  const linked = (column_links) => ({ ...base, type: 'table', options: { column_links } })
+
+  it('renders an external link with the row value substituted', async () => {
+    const { container } = await mount(
+      linked({ status: 'https://helpdesk.internal/s/{status}' }))
+    const a = container.querySelector('a.cell-link')
+    expect(a.getAttribute('href')).toBe('https://helpdesk.internal/s/sukses')
+    expect(a.getAttribute('target')).toBe('_blank')
+    expect(a.getAttribute('rel')).toContain('noopener')
+  })
+
+  it('leaves unlinked columns as plain text', async () => {
+    const { container } = await mount(linked({ status: 'https://x/{status}' }))
+    const cells = container.querySelectorAll('tbody tr:first-child td')
+    expect(cells[0].querySelector('a')).toBeTruthy()
+    expect(cells[1].querySelector('a')).toBeNull()
+  })
+
+  it('renders plain text rather than a broken link when the value is missing', async () => {
+    const { container } = await mount(linked({ status: 'https://x/{nonexistent}' }))
+    expect(container.querySelector('a.cell-link')).toBeNull()
+    expect(container.textContent).toContain('sukses')
+  })
+
+  it('refuses a javascript: template', async () => {
+    const { container } = await mount(linked({ status: 'javascript:alert(1)' }))
+    expect(container.querySelector('a.cell-link')).toBeNull()
+  })
+
+  it('renders with no links configured', async () => {
+    const { container } = await mount({ ...base, type: 'table', options: {} })
+    expect(container.querySelectorAll('tbody tr').length).toBe(2)
+    expect(container.querySelector('a.cell-link')).toBeNull()
+  })
+})
+
+describe('gauge', () => {
+  const gauge = (options) => ({ ...base, type: 'gauge', options })
+
+  it('applies number formatting to the displayed value', async () => {
+    const { container } = await mount(gauge({
+      value_field: 'total', aggregate: 'sum', gauge_max: 50000,
+      compact: true, unit: '',
+    }))
+    // 23159 + 3217 = 26376 -> compact
+    expect(container.textContent).toMatch(/26\.4K/)
+  })
+
+  it('appends the unit', async () => {
+    const { container } = await mount(gauge({
+      value_field: 'total', gauge_max: 50000, unit: ' rb',
+    }))
+    expect(container.textContent).toContain('rb')
+  })
+
+  it('draws a tick for each threshold inside the scale', async () => {
+    const { container } = await mount(gauge({
+      value_field: 'total', gauge_min: 0, gauge_max: 100,
+      thresholds: { direction: 'above', warn: 70, critical: 90 },
+    }))
+    expect(container.querySelectorAll('svg line')).toHaveLength(2)
+  })
+
+  it('ignores thresholds that fall outside the scale', async () => {
+    const { container } = await mount(gauge({
+      value_field: 'total', gauge_min: 0, gauge_max: 100,
+      thresholds: { direction: 'above', warn: 500, critical: 900 },
+    }))
+    expect(container.querySelectorAll('svg line')).toHaveLength(0)
+  })
+
+  it('keeps the scale labels clear of the arc', async () => {
+    // the labels used to be drawn on top of the arc, which made a small value
+    // look like a malformed blob
+    const { container } = await mount(gauge({ value_field: 'total', gauge_max: 100 }))
+    const svg = container.querySelector('svg')
+    const [, , , viewH] = svg.getAttribute('viewBox').split(' ').map(Number)
+    const bounds = [...svg.querySelectorAll('text.gauge-bound')]
+    expect(bounds).toHaveLength(2)
+    for (const t of bounds) {
+      // sits in the bottom band, below where the arc ends
+      expect(Number(t.getAttribute('y'))).toBeGreaterThan(viewH - 20)
+    }
+  })
+
+  it('centres the value inside the ring', async () => {
+    const { container } = await mount(gauge({ value_field: 'total', gauge_max: 100 }))
+    const value = container.querySelector('text.gauge-value')
+    expect(value.getAttribute('dominant-baseline')).toBe('middle')
+  })
+
+  it('renders without thresholds at all', async () => {
+    const { container } = await mount(gauge({ value_field: 'total' }))
+    expect(container.querySelector('svg')).toBeTruthy()
+    expect(container.querySelectorAll('svg line')).toHaveLength(0)
+  })
 })
 
 describe('in-table filtering', () => {

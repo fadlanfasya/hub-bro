@@ -164,19 +164,36 @@ export function themeToCssVars(theme, mode = 'light') {
 }
 
 /**
+ * Text colour that stays readable on a given fill — white on dark colours,
+ * near-black on light ones. Picking by contrast rather than guessing means a
+ * pale yellow card gets dark text instead of invisible white.
+ */
+export function onColor(hex) {
+  const white = '#ffffff'
+  const black = '#111418'
+  return contrastRatio(white, hex) >= contrastRatio(black, hex) ? white : black
+}
+
+/**
  * Per-widget accent override. Returns the CSS variables to set on a widget, or
  * undefined so React leaves the element's style alone when nothing is set.
  *
- * A widget accent recolours that widget's charts and value, letting one
- * critical KPI stand apart from the rest of the dashboard.
+ * `background` controls how far the accent goes:
+ *   none   accent recolours the value and charts only (default)
+ *   soft   a tinted card — enough to group or highlight without shouting
+ *   solid  the accent fills the card, with text flipped to stay readable
+ *
+ * Solid is deliberately limited to stat, gauge and text widgets: a filled
+ * background behind a line chart or a table makes both harder to read.
  */
-export function widgetAccentVars(accent, mode = 'light') {
+export function widgetAccentVars(accent, mode = 'light', background = 'none') {
   if (!isValidHex(accent)) return undefined
   const dark = mode === 'dark'
   const surface = dark ? '#161b22' : '#ffffff'
-  const readable = ensureReadable(normaliseHex(accent), surface)
+  const raw = normaliseHex(accent)
+  const readable = ensureReadable(raw, surface)
 
-  return {
+  const vars = {
     '--primary': readable,
     '--primary-strong': shift(readable, dark ? 0.15 : -0.18),
     '--primary-soft': withAlpha(readable, dark ? 0.16 : 0.12),
@@ -184,6 +201,24 @@ export function widgetAccentVars(accent, mode = 'light') {
     // dashboard palette for any additional series
     '--chart-1': readable,
   }
+
+  if (background === 'soft') {
+    vars['--widget-bg'] = withAlpha(raw, dark ? 0.16 : 0.09)
+    vars['--widget-border'] = withAlpha(raw, dark ? 0.35 : 0.25)
+  }
+
+  if (background === 'solid') {
+    // the raw colour is used here, not the contrast-corrected accent: on a
+    // solid fill it's the text that adapts, so the chosen colour is honoured
+    const ink = onColor(raw)
+    vars['--widget-bg'] = raw
+    vars['--widget-border'] = raw
+    vars['--widget-ink'] = ink
+    vars['--widget-muted'] = withAlpha(ink === '#ffffff' ? '#ffffff' : '#000000', 0.65)
+    vars['--chart-1'] = ink
+  }
+
+  return vars
 }
 
 /** True when the theme is just the default — used to hide a "reset" button. */

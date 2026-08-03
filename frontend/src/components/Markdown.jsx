@@ -1,4 +1,6 @@
+import { Link } from 'react-router-dom'
 import { parseMarkdown } from '../markdown'
+import { linkProps } from '../links'
 
 /**
  * Renders the token tree from markdown.js as React elements.
@@ -80,10 +82,14 @@ function Inline({ tokens }) {
       case 'bold': return <strong key={i}>{t.value}</strong>
       case 'italic': return <em key={i}>{t.value}</em>
       case 'code': return <code key={i}>{t.value}</code>
-      case 'link':
-        return (
-          <a key={i} href={t.href} target="_blank" rel="noopener noreferrer">{t.value}</a>
-        )
+      case 'link': {
+        // a link to another dashboard should route in place rather than
+        // reloading the whole app
+        const props = linkProps(t.href)
+        return props.internal
+          ? <Link key={i} to={props.to}>{t.value}</Link>
+          : <a key={i} href={props.href} target={props.target} rel={props.rel}>{t.value}</a>
+      }
       default: return <span key={i}>{t.value}</span>
     }
   })

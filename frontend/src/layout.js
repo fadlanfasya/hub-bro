@@ -14,14 +14,23 @@ export function toGridItems(widgets = [], layout = []) {
   const byId = new Map(layout.map((l) => [String(l.i), l]))
   return widgets.map((w, index) => {
     const l = byId.get(String(w.id)) || {}
+    const width = numberOr(l.w, DEFAULTS.w)
+    const height = numberOr(l.h, DEFAULTS.h)
+    const min = minSizeFor(w.type)
+
     return {
       id: String(w.id),
       x: numberOr(l.x, 0),
       y: numberOr(l.y, index * DEFAULTS.h),
-      w: numberOr(l.w, DEFAULTS.w),
-      h: numberOr(l.h, DEFAULTS.h),
-      minW: minSizeFor(w.type).w,
-      minH: minSizeFor(w.type).h,
+      w: width,
+      h: height,
+      // Never let the type minimum enlarge a widget that was deliberately
+      // saved smaller. gridstack applies minW/minH when loading, so a bare
+      // `min.w` would silently grow small widgets every time the dashboard
+      // opened. Clamping to the stored size keeps the floor for new widgets
+      // while leaving existing layouts exactly as saved.
+      minW: Math.min(min.w, width),
+      minH: Math.min(min.h, height),
       locked: Boolean(w.locked),
       widget: w,
     }
@@ -41,11 +50,29 @@ export function nextSlot(layout = []) {
   return { x: 0, y, w: DEFAULTS.w, h: DEFAULTS.h }
 }
 
-/** Minimum size per widget type, so charts can't be shrunk into illegibility. */
+/**
+ * Class list for a widget card, covering lock state and any coloured
+ * background. Shared by the editor and the public view so a shared dashboard
+ * looks identical to the one you built.
+ */
+export function widgetClass(widget, locked) {
+  const bg = widget?.options?.widget_bg
+  return [
+    'widget',
+    locked ? 'locked' : '',
+    bg === 'soft' || bg === 'solid' ? 'has-bg' : '',
+    bg === 'solid' ? 'bg-solid' : '',
+  ].filter(Boolean).join(' ')
+}
+
+/**
+ * Starting minimum size for a newly added widget — a hint, not a rule.
+ * Kept deliberately small: it's your dashboard, and a cramped chart is your
+ * call to make. `toGridItems` clamps these to any smaller saved size.
+ */
 export function minSizeFor(type) {
-  if (type === 'stat') return { w: 2, h: 2 }
-  if (type === 'table') return { w: 3, h: 3 }
-  return { w: 3, h: 3 }   // line / bar / pie need room for axes and a legend
+  if (type === 'stat' || type === 'text') return { w: 1, h: 2 }
+  return { w: 2, h: 2 }
 }
 
 /** True when a layout entry differs from the stored one — used to skip no-op saves. */

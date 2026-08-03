@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { layoutsEqual, minSizeFor, nextSlot, toGridItems, toStoredLayout } from './layout'
+import {
+  layoutsEqual, minSizeFor, nextSlot, toGridItems, toStoredLayout, widgetClass,
+} from './layout'
 
 describe('toGridItems', () => {
   const widgets = [
@@ -22,10 +24,26 @@ describe('toGridItems', () => {
     expect(toGridItems(widgets, layout)[0].widget).toBe(widgets[0])
   })
 
-  it('applies a minimum size based on widget type', () => {
-    const items = toGridItems(widgets, layout)
-    expect(items[0].minW).toBe(3)   // chart
-    expect(items[1].minW).toBe(2)   // stat card can go smaller
+  it('never lets the type minimum enlarge a smaller saved widget', () => {
+    // gridstack applies minW/minH on load, so a minimum above the saved size
+    // would grow the widget every time the dashboard opened
+    const tiny = toGridItems(
+      [{ id: 'w1', type: 'line', title: 'Chart' }],
+      [{ i: 'w1', x: 0, y: 0, w: 1, h: 1 }]
+    )[0]
+    expect(tiny.w).toBe(1)
+    expect(tiny.h).toBe(1)
+    expect(tiny.minW).toBeLessThanOrEqual(1)
+    expect(tiny.minH).toBeLessThanOrEqual(1)
+  })
+
+  it('keeps a sensible floor for widgets at or above the minimum', () => {
+    const roomy = toGridItems(
+      [{ id: 'w1', type: 'line', title: 'Chart' }],
+      [{ i: 'w1', x: 0, y: 0, w: 6, h: 4 }]
+    )[0]
+    expect(roomy.minW).toBe(minSizeFor('line').w)
+    expect(roomy.minH).toBe(minSizeFor('line').h)
   })
 
   it('gives widgets with no layout entry a stacked position', () => {
@@ -84,12 +102,45 @@ describe('nextSlot', () => {
 })
 
 describe('minSizeFor', () => {
-  it('lets stat cards be small but keeps charts readable', () => {
+  it('lets stat and text widgets go narrower than charts', () => {
     expect(minSizeFor('stat').w).toBeLessThan(minSizeFor('line').w)
+    expect(minSizeFor('text').w).toBeLessThan(minSizeFor('table').w)
+  })
+
+  it('stays small enough not to fight the user', () => {
+    for (const type of ['stat', 'text', 'line', 'bar', 'pie', 'table', 'gauge']) {
+      expect(minSizeFor(type).w, type).toBeLessThanOrEqual(2)
+      expect(minSizeFor(type).h, type).toBeLessThanOrEqual(2)
+    }
   })
 
   it('has a sensible default for unknown types', () => {
-    expect(minSizeFor('something-new')).toEqual({ w: 3, h: 3 })
+    expect(minSizeFor('something-new')).toEqual({ w: 2, h: 2 })
+  })
+})
+
+describe('widgetClass', () => {
+  it('is a plain widget by default', () => {
+    expect(widgetClass({ options: {} }, false)).toBe('widget')
+  })
+
+  it('marks a locked widget', () => {
+    expect(widgetClass({ options: {} }, true)).toBe('widget locked')
+  })
+
+  it('adds the background classes', () => {
+    expect(widgetClass({ options: { widget_bg: 'soft' } }, false)).toBe('widget has-bg')
+    expect(widgetClass({ options: { widget_bg: 'solid' } }, false))
+      .toBe('widget has-bg bg-solid')
+  })
+
+  it('ignores an unknown background value', () => {
+    expect(widgetClass({ options: { widget_bg: 'rainbow' } }, false)).toBe('widget')
+  })
+
+  it('survives a widget with no options', () => {
+    expect(widgetClass({}, false)).toBe('widget')
+    expect(widgetClass(undefined, false)).toBe('widget')
   })
 })
 

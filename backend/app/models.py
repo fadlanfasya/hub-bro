@@ -42,6 +42,9 @@ class DataSource(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     owner = relationship("User", back_populates="datasources")
+    checks = relationship("DataSourceCheck", cascade="all, delete-orphan",
+                          primaryjoin="DataSource.id == DataSourceCheck.datasource_id",
+                          foreign_keys="DataSourceCheck.datasource_id")
 
     @property
     def raw_config_dict(self) -> dict:
@@ -59,6 +62,26 @@ class DataSource(Base):
         """Config with secrets masked — safe to return over the API."""
         from .secrets_store import mask_config
         return mask_config(self.raw_config_dict)
+
+
+class DataSourceCheck(Base):
+    """One health check result for a data source.
+
+    Written both by real widget fetches and by the optional background monitor,
+    so the health page reflects what actually happened rather than a synthetic
+    probe alone. Capped per source — see health.MAX_CHECKS_PER_SOURCE.
+    """
+    __tablename__ = "datasource_checks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    datasource_id = Column(Integer, ForeignKey("datasources.id"), nullable=False, index=True)
+    ok = Column(Boolean, nullable=False)
+    error = Column(String, nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+    # "fetch" when a widget triggered it, "monitor" for the background timer,
+    # "manual" when someone pressed Test
+    source = Column(String, nullable=False, default="fetch")
+    checked_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 
 class Dashboard(Base):

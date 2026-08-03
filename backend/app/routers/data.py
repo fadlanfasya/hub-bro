@@ -1,9 +1,11 @@
 import json
+import logging
+import time
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from .. import cache
+from .. import cache, health
 from ..auth import get_current_user
 from ..connectors import fetch_data
 from ..database import get_db
@@ -36,28 +38,46 @@ def _split_options(ds_type: str, options: dict) -> tuple[dict, dict]:
     return fetch_options, transform_options
 
 
-async def _load(ds, fetch_options: dict) -> dict:
+async def _load(ds, fetch_options: dict, db: Session | None = None) -> dict:
     key = cache.make_key(ds.id, fetch_options)
     result = cache.get(key)
     if result is not None:
-        return result
+        return result   # a cache hit says nothing about the source's health
 
     lock = await cache.lock_for(key)
     async with lock:
         result = cache.get(key)  # another request may have filled it while we waited
         if result is None:
+            started = time.perf_counter()
             try:
                 result = await fetch_data(ds, fetch_options)
             except Exception as e:
+                _record_health(db, ds.id, False, str(e), started)
                 raise HTTPException(status_code=502, detail=f"Failed to fetch data: {e}")
+            _record_health(db, ds.id, True, None, started)
             cache.set(key, result)
     return result
 
 
-async def _run(ds, options: dict):
+def _record_health(db, datasource_id: int, ok: bool, error: str | None, started: float):
+    """Feed the outcome of a real fetch into the health page.
+
+    Never let health bookkeeping break a working request — a failure to write
+    the row is logged and ignored.
+    """
+    if db is None:
+        return
+    try:
+        health.record(db, datasource_id, ok, error,
+                      int((time.perf_counter() - started) * 1000), source="fetch")
+    except Exception as e:
+        logging.getLogger("uvicorn.error").debug("Could not record health: %s", e)
+
+
+async def _run(ds, options: dict, db: Session | None = None):
     """Fetch, transform, and assemble the response for one query."""
     fetch_options, transform_options = _split_options(ds.type, options)
-    result = await _load(ds, fetch_options)
+    result = await _load(ds, fetch_options, db)
 
     meta = dict(result.get("meta") or {})
     unpushed = result.get("_unpushed_filters")
@@ -101,7 +121,7 @@ async def fetch_for_widget(dashboard_id: int, widget_id: str,
     if not ds:
         raise HTTPException(status_code=404, detail="Data source not found")
 
-    return await _run(ds, widget.get("options") or {})
+    return await _run(ds, widget.get("options") or {}, db)
 
 
 @router.post("/fetch")
@@ -117,7 +137,7 @@ async def fetch(payload: DataFetchRequest,
     if not ds:
         raise HTTPException(status_code=404, detail="Data source not found")
 
-    return await _run(ds, payload.options or {})
+    return await _run(ds, payload.options or {}, db)
 
 
 @router.post("/invalidate/{datasource_id}")

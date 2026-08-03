@@ -67,6 +67,11 @@ class Settings:
 
     UPLOAD_DIR: Path = Path(os.environ.get("UPLOAD_DIR", BASE_DIR / "uploads"))
 
+    # How often to probe data sources that have monitoring switched on, in
+    # seconds. 0 disables the background monitor entirely; health then comes
+    # only from real widget fetches.
+    HEALTH_CHECK_INTERVAL: int = _int("HEALTH_CHECK_INTERVAL", 300)
+
     # --- serving the built frontend ---
     # When this directory holds a build, the API also serves the UI on the same
     # port. Empty in development, where Vite serves it instead.

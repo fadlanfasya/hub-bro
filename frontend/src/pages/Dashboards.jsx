@@ -3,12 +3,14 @@ import { Link } from 'react-router-dom'
 import { LayoutDashboard, Plus, Trash2, ArrowRight, Copy, Share2 } from 'lucide-react'
 import { dashboards } from '../api'
 import { useAuth } from '../useAuth'
+import EditableTitle from '../components/EditableTitle'
 
 export default function Dashboards() {
   const { can } = useAuth()
   const canEdit = can('dashboard.edit')
   const [items, setItems] = useState([])
   const [name, setName] = useState('')
+  const [error, setError] = useState('')
 
   const load = () => dashboards.list().then((res) => setItems(res.data))
   useEffect(() => { load() }, [])
@@ -19,6 +21,16 @@ export default function Dashboards() {
     await dashboards.create(name.trim())
     setName('')
     load()
+  }
+
+  const rename = async (id, name) => {
+    setError('')
+    try {
+      await dashboards.update(id, { name })
+      load()
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Could not rename')
+    }
   }
 
   const duplicate = async (id) => {
@@ -50,6 +62,8 @@ export default function Dashboards() {
         )}
       </div>
 
+      {error && <div className="error" style={{ marginBottom: 16 }}>{error}</div>}
+
       {items.length === 0 ? (
         <div className="empty-state">
           <LayoutDashboard size={32} />
@@ -61,7 +75,13 @@ export default function Dashboards() {
         <div className="grid-cards">
           {items.map((d) => (
             <div className="card dashboard-card" key={d.id}>
-              <h3><Link to={`/dashboards/${d.id}`}>{d.name}</Link></h3>
+              <h3>
+                {canEdit ? (
+                  <EditableTitle value={d.name} onSave={(name) => rename(d.id, name)} />
+                ) : (
+                  <Link to={`/dashboards/${d.id}`}>{d.name}</Link>
+                )}
+              </h3>
               <div className="muted">
                 {d.definition.widgets?.length || 0} widgets
                 {d.share_token && (

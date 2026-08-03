@@ -3,7 +3,9 @@ import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, CartesianGrid,
   ResponsiveContainer, Legend,
 } from 'recharts'
-import { AlertCircle, TrendingUp, TrendingDown, Minus, Search } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { AlertCircle, TrendingUp, TrendingDown, Minus, Search, ExternalLink } from 'lucide-react'
+import { buildLinkUrl, linkProps } from '../links'
 import { data as dataApi, publicApi } from '../api'
 import { describeThreshold, evaluateThreshold } from '../thresholds'
 import { computeTrend, formatStatValue, formatTrend } from '../format'
@@ -153,6 +155,25 @@ function renderSliceLabel({ cx, cy, midAngle, outerRadius, name, value, percent 
   )
 }
 
+/**
+ * A linked table cell. Internal paths route without a page reload; external
+ * ones open in a new tab so the dashboard stays put — usually on a wall screen.
+ * The click is stopped so it doesn't also trigger the row's cross-filter.
+ */
+function CellLink({ href, text }) {
+  const props = linkProps(href)
+  const stop = (e) => e.stopPropagation()
+  if (props.internal) {
+    return <Link to={props.to} className="cell-link" onClick={stop}>{text}</Link>
+  }
+  return (
+    <a href={props.href} target={props.target} rel={props.rel}
+      className="cell-link" onClick={stop}>
+      {text}<ExternalLink size={10} />
+    </a>
+  )
+}
+
 /** Table with click-to-sort headers and per-cell colour rules. */
 function DataTable({ columns, rows, opts, selection, onSelect }) {
   const [sort, setSort] = useState(
@@ -222,11 +243,13 @@ function DataTable({ columns, rows, opts, selection, onSelect }) {
               onClick={onSelect ? () => onSelect(keyColumn, r[keyColumn]) : undefined}>
               {shown.map((c) => {
                 const tone = toneForCell(r, c, rules)
+                const href = buildLinkUrl(opts.column_links?.[c], r)
+                const text = String(r[c] ?? '')
                 return (
                   <td key={c}
                     className={[numericColumns.has(c) ? 'num' : '', tone ? `tone-${tone}` : '']
                       .filter(Boolean).join(' ')}>
-                    {String(r[c] ?? '')}
+                    {href ? <CellLink href={href} text={text} /> : text}
                   </td>
                 )
               })}
@@ -317,8 +340,13 @@ function WidgetPlot({ widget, result, selection, onSelect }) {
         min={Number(opts.gauge_min ?? 0)}
         max={Number(opts.gauge_max ?? 100)}
         unit={opts.unit || ''}
-        label={opts.hide_label ? '' : field}
+        label={opts.label ?? (opts.hide_label ? '' : field)}
         level={level}
+        thresholds={opts.thresholds}
+        format={{
+          decimals: opts.decimals, thousands: opts.thousands,
+          compact: opts.compact, prefix: opts.prefix,
+        }}
       />
     )
   }

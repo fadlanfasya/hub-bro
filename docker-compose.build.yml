@@ -1,0 +1,14 @@
+# Override for building the image locally instead of pulling it.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+#
+# Kept separate so the main compose file stays deployable on a server that has
+# no source checkout — it only needs docker-compose.yml and .env.
+#
+# Bump the tag here and in docker-compose.yml together when you release.
+services:
+  hubbro:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: fadlanfasya/hub-bro:1.0

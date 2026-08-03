@@ -1,0 +1,38 @@
+# Adds nginx in front of Hub-Bro for TLS.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.nginx.yml up -d
+#
+# Before starting:
+#   1. put fullchain.pem and privkey.pem in ./nginx/certs/
+#   2. set your hostname in nginx/hub-bro.conf (replace dashboards.example.com)
+#   3. set CORS_ORIGINS=https://your-host in .env
+#   4. comment out the `ports:` block in docker-compose.yml — nginx reaches the
+#      app over the compose network, so publishing 8080 would leave an
+#      unencrypted way in that bypasses TLS
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: hub-bro-nginx
+    restart: unless-stopped
+    depends_on:
+      - hubbro
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/hub-bro.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+      - certbot-www:/var/www/certbot
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  certbot-www:

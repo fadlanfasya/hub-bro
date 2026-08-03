@@ -235,6 +235,19 @@ label .optional { color: var(--faint); font-weight: 400; }
   background: var(--primary-soft); border-color: var(--primary); color: var(--primary);
 }
 
+/* stored credential, shown without ever revealing the value */
+.secret-saved {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 7px 10px;
+}
+.secret-saved > svg { color: var(--muted); flex-shrink: 0; }
+.secret-dots { letter-spacing: 2px; color: var(--ink-2); font-size: 13px; }
+.secret-note {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 11.5px; color: var(--success);
+}
+
 /* select with a leading type icon (data source picker) */
 .select-with-icon { position: relative; }
 .select-with-icon .select-icon {
@@ -381,6 +394,24 @@ label .optional { color: var(--faint); font-weight: 400; }
   position: sticky; top: 0; z-index: 20;
 }
 .editor-bar h1 { margin: 0; font-size: 18px; }
+
+/* ---- click-to-rename ---- */
+.editable-title {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: transparent; border: 0; padding: 2px 6px; margin-left: -6px;
+  border-radius: var(--radius-sm);
+  font: inherit; color: inherit; cursor: text; text-align: left;
+  max-width: 100%;
+}
+.editable-title:hover { background: var(--surface-2); }
+.editable-title svg { opacity: 0; color: var(--muted); flex-shrink: 0; }
+.editable-title:hover svg { opacity: 1; }
+.editable-title-input {
+  font: inherit; color: var(--ink); padding: 2px 6px; margin-left: -6px;
+  width: auto; min-width: 140px; max-width: 100%;
+  background: var(--surface); border: 1px solid var(--primary);
+}
+.dashboard-card .editable-title { font: inherit; }
 .editor-bar .spacer { flex: 1; }
 .save-state {
   display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted);
@@ -393,6 +424,34 @@ label .optional { color: var(--faint); font-weight: 400; }
   height: 100%; display: flex; flex-direction: column; overflow: hidden;
 }
 .widget:hover { border-color: var(--border-strong); }
+
+/* coloured cards — see widgetAccentVars in theme.js */
+.widget.has-bg { background: var(--widget-bg); border-color: var(--widget-border); }
+.widget.has-bg:hover { border-color: var(--widget-border); }
+.widget.has-bg .widget-header { border-bottom-color: var(--widget-border); }
+
+/* on a solid fill everything flips to the contrast-safe ink colour */
+.widget.bg-solid,
+.widget.bg-solid .widget-header,
+.widget.bg-solid .stat-value,
+.widget.bg-solid .gauge-value { color: var(--widget-ink); }
+.widget.bg-solid .stat-label,
+.widget.bg-solid .grip,
+.widget.bg-solid .stat-trend-label,
+.widget.bg-solid .muted { color: var(--widget-muted); }
+.widget.bg-solid .widget-header .actions button { color: var(--widget-muted); }
+.widget.bg-solid .widget-header .actions button:hover { color: var(--widget-ink); background: rgba(255, 255, 255, .15); }
+.widget.bg-solid .widget-header:hover { background: transparent; }
+.widget.bg-solid .stat-trend { background: rgba(255, 255, 255, .18); color: var(--widget-ink); }
+/* a threshold breach still needs to read as a breach, so keep those colours */
+.widget.bg-solid .stat-value.level-warn,
+.widget.bg-solid .stat-value.level-critical { color: var(--widget-ink); }
+.widget.bg-solid .status-pill { background: rgba(255, 255, 255, .2); color: var(--widget-ink); }
+.widget.bg-solid .markdown,
+.widget.bg-solid .markdown h2,
+.widget.bg-solid .markdown h3 { color: var(--widget-ink); }
+.widget.bg-solid .markdown h4,
+.widget.bg-solid .markdown blockquote { color: var(--widget-muted); }
 .widget-header {
   display: flex; align-items: center; gap: 8px; padding: 12px 16px;
   font-size: 14px; font-weight: 500; color: var(--ink);
@@ -646,6 +705,53 @@ table.data td.tone-muted { color: var(--muted); }
 .markdown-table th { font-weight: 500; color: var(--muted); }
 .markdown-table td { color: var(--ink-2); }
 .markdown-table tbody tr:hover td { background: transparent; }
+
+/* ---- links out of a widget ---- */
+.cell-link {
+  display: inline-flex; align-items: center; gap: 3px;
+  color: var(--primary); font-weight: 500;
+}
+.cell-link:hover { text-decoration: underline; }
+.cell-link svg { opacity: .6; flex-shrink: 0; }
+
+.widget-link {
+  display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0;
+  font-size: 11.5px; font-weight: 500; color: var(--primary);
+  padding: 2px 6px; border-radius: var(--radius-pill);
+}
+.widget-link:hover { background: var(--primary-soft); text-decoration: none; }
+
+/* ---- data source health ---- */
+.health-card { display: flex; flex-direction: column; gap: var(--space-3); }
+.health-card .head { display: flex; align-items: center; gap: 10px; }
+.health-card .type-icon.status-ok { background: var(--success-soft); color: var(--success); }
+.health-card .type-icon.status-failing { background: var(--danger-soft); color: var(--danger); }
+.health-card .type-icon.status-stale { background: rgba(183, 121, 31, .12); color: #b7791f; }
+.health-card .type-icon.status-unknown { background: var(--surface-2); color: var(--muted); }
+:root[data-theme='dark'] .health-card .type-icon.status-stale { color: var(--accent); }
+
+.health-facts { display: flex; gap: var(--space-5); margin: 0; flex-wrap: wrap; }
+.health-facts dt { font-size: 11.5px; color: var(--muted); margin: 0; }
+.health-facts dd {
+  font-size: 13px; color: var(--ink); margin: 2px 0 0; font-variant-numeric: tabular-nums;
+}
+
+.sparkline { display: flex; align-items: flex-end; gap: 2px; height: 26px; }
+.sparkline .spark { flex: 1; min-width: 2px; border-radius: 1px; }
+.sparkline .spark.ok { background: var(--primary); opacity: .55; }
+.sparkline .spark.bad { background: var(--danger); height: 100% !important; }
+
+.health-error {
+  display: flex; align-items: flex-start; gap: 6px;
+  font-size: 12px; color: var(--danger); background: var(--danger-soft);
+  padding: 7px 9px; border-radius: var(--radius-sm);
+}
+.health-error span {
+  overflow: hidden; text-overflow: ellipsis; display: -webkit-box;
+  -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.health-deps { font-size: 12.5px; color: var(--ink-2); }
+.health-card .actions { margin-top: auto; }
 
 /* ---- version history ---- */
 .history-list { display: flex; flex-direction: column; gap: 2px; margin-top: var(--space-3); }

@@ -67,25 +67,35 @@ check "a snapshot from another dashboard is rejected" \
   "$(curl -s -X POST $B/api/dashboards -H "$A" -H "$JSON" -d '{"name":"Other"}' > /dev/null; \
      code -X POST $B/api/dashboards/2/history/$OLDEST/restore -H "$A")" "404"
 
-echo "debounce and widget counts"
-BEFORE=$(curl -s $B/api/dashboards/1/history -H "$A" | jq_ "len(d)")
-curl -s -X PUT $B/api/dashboards/1 -H "$A" -H "$JSON" -d '{
-  "definition":{"widgets":[{"id":"w1","type":"text","title":"A","options":{}},
-                           {"id":"w2","type":"text","title":"B","options":{}}],"layout":[]}}' > /dev/null
-curl -s -X PUT $B/api/dashboards/1 -H "$A" -H "$JSON" -d '{"name":"After widgets"}' > /dev/null
-curl -s -X PUT $B/api/dashboards/1 -H "$A" -H "$JSON" -d '{"name":"Again"}' > /dev/null
-AFTER=$(curl -s $B/api/dashboards/1/history -H "$A" | jq_ "len(d)")
-# layout auto-save fires every ~600ms while dragging; without debouncing, the
-# history would fill with near-identical entries and bury the useful ones
-check "three rapid saves by one author add at most one snapshot" \
-  "$([ $((AFTER - BEFORE)) -le 1 ] && echo yes)" "yes"
-check "the dashboard still saved despite the debounce" \
-  "$(curl -s $B/api/dashboards/1 -H "$A" | jq_ "d['name']")" "Again"
+echo "every distinct state is kept"
+# Snapshots dedupe on content, not on a timer. A timer-based debounce meant a
+# layout you had just built could be dropped before the save that broke it —
+# exactly the state you would want back.
+LAYOUT_A='{"definition":{"widgets":[{"id":"w1","type":"text","title":"A","options":{}},{"id":"w2","type":"text","title":"B","options":{}}],"layout":[{"i":"w1","x":0,"y":0,"w":3,"h":3}]}}'
+LAYOUT_B='{"definition":{"widgets":[{"id":"w1","type":"text","title":"A","options":{}},{"id":"w2","type":"text","title":"B","options":{}}],"layout":[{"i":"w1","x":0,"y":0,"w":8,"h":6}]}}'
 
-# a restore always snapshots, bypassing the debounce, so it captures the
-# current state including the widgets added above
-NEWEST=$(curl -s $B/api/dashboards/1/history -H "$A" | jq_ "d[0]['id']")
-curl -s -X POST $B/api/dashboards/1/history/$NEWEST/restore -H "$A" > /dev/null
+curl -s -X PUT $B/api/dashboards/1 -H "$A" -H "$JSON" -d "$LAYOUT_A" > /dev/null
+BEFORE=$(curl -s $B/api/dashboards/1/history -H "$A" | jq_ "len(d)")
+curl -s -X PUT $B/api/dashboards/1 -H "$A" -H "$JSON" -d "$LAYOUT_B" > /dev/null
+AFTER=$(curl -s $B/api/dashboards/1/history -H "$A" | jq_ "len(d)")
+check "a differing save is always snapshotted, however soon it follows" \
+  "$((AFTER - BEFORE))" "1"
+check "the good layout is recoverable from the newest snapshot" \
+  "$(curl -s $B/api/dashboards/1/history -H "$A" | jq_ "d[0]['id']" \
+     | xargs -I{} python3 -c "
+import json,sqlite3
+row=sqlite3.connect('/tmp/hubbro-history-test.db').execute('select definition from dashboard_snapshots where id={}').fetchone()[0]
+print(json.loads(row)['layout'][0]['w'])")" "3"
+
+# A state is snapshotted the first time something replaces it, so the first
+# repeat still records B itself. From then on nothing grows.
+curl -s -X PUT $B/api/dashboards/1 -H "$A" -H "$JSON" -d "$LAYOUT_B" > /dev/null
+SETTLED=$(curl -s $B/api/dashboards/1/history -H "$A" | jq_ "len(d)")
+curl -s -X PUT $B/api/dashboards/1 -H "$A" -H "$JSON" -d "$LAYOUT_B" > /dev/null
+curl -s -X PUT $B/api/dashboards/1 -H "$A" -H "$JSON" -d "$LAYOUT_B" > /dev/null
+check "repeated identical saves stop adding snapshots" \
+  "$(curl -s $B/api/dashboards/1/history -H "$A" | jq_ "len(d)")" "$SETTLED"
+
 check "a snapshot records how many widgets it held" \
   "$(curl -s $B/api/dashboards/1/history -H "$A" | jq_ "max(s['widget_count'] for s in d)")" "2"
 
