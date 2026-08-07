@@ -51,7 +51,7 @@ export default function SecretField({
       </div>
       {hint && <p className="hint">{hint}</p>}
       {hasStored && (
-        <p className="hint">Leave this blank and cancel to keep the saved value.</p>
+        <p className="hint">Leaving this blank keeps the saved value — it is never erased by an empty field.</p>
       )}
     </>
   )

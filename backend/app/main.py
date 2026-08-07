@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import migrations, static_files
 from .config import check_production_config, settings
 from .database import Base, engine
-from .routers import auth_routes, dashboards, data, datasources, public, users
+from .routers import alerts, auth_routes, dashboards, data, datasources, public, users
 
 log = logging.getLogger("uvicorn.error")
 
@@ -18,6 +18,17 @@ if problems:
     for p in problems:
         log.error("Refusing to start: %s", p)
     sys.exit(1)
+
+# Development only: an unset SECRET_KEY is regenerated on every start, which
+# silently makes credentials saved in a previous run undecryptable. They read
+# back as empty, so a data source that worked before the restart now fails to
+# authenticate — with no obvious connection to the restart.
+if settings.SECRET_KEY_IS_EPHEMERAL:
+    log.warning(
+        "SECRET_KEY is not set, so a new one was generated for this run. "
+        "Any data source credentials saved earlier can no longer be decrypted "
+        "and will need re-entering. Set SECRET_KEY to keep them across restarts."
+    )
 
 migrations.run(engine)          # add columns missing from an older database
 Base.metadata.create_all(bind=engine)
@@ -55,6 +66,7 @@ app.include_router(users.router)
 app.include_router(datasources.router)
 app.include_router(dashboards.router)
 app.include_router(data.router)
+app.include_router(alerts.router)
 app.include_router(public.router)
 
 
@@ -80,11 +92,25 @@ async def start_health_monitor():
     )
 
 
+@app.on_event("startup")
+async def start_alert_scheduler():
+    """Evaluate alert rules on a timer.
+
+    Runs independently of anyone having a browser open — an alarm that only
+    fires while a dashboard is being watched is not an alarm.
+    """
+    if not settings.ALERTS_ENABLED or settings.ALERT_TICK_SECONDS <= 0:
+        return
+    from . import alerting
+    app.state.alert_task = asyncio.create_task(alerting.alert_loop())
+
+
 @app.on_event("shutdown")
-async def stop_health_monitor():
-    task = getattr(app.state, "health_task", None)
-    if task:
-        task.cancel()
+async def stop_background_tasks():
+    for name in ("health_task", "alert_task"):
+        task = getattr(app.state, name, None)
+        if task:
+            task.cancel()
 
 
 # Must come last: the SPA fallback claims every unmatched non-/api route.

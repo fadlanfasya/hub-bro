@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  buildOptions, computeStat, pivotSeries, resolveChartFields, visibleColumns,
+  buildOptions, computeStat, fillDetail, pivotSeries, resolveChartFields, visibleColumns,
 } from './widgetData'
 import { describeThreshold, evaluateThreshold } from './thresholds'
 
@@ -219,5 +219,105 @@ describe('describeThreshold', () => {
       .toBe('85 is at or above the warn threshold of 80')
     expect(describeThreshold('2', { direction: 'below', warn: 20, critical: 5 }, 'critical'))
       .toBe('2 is at or below the critical threshold of 5')
+  })
+})
+
+describe('fillDetail — supporting numbers on a stat tile', () => {
+  const cols = ['on_track', 'warning', 'breach', 'label']
+  const rows = [{ on_track: 13, warning: 0, breach: 2, label: 'today' }]
+
+  it('substitutes columns from the same row', () => {
+    expect(fillDetail('{on_track} on track · {warning} warning', rows, cols))
+      .toBe('13 on track · 0 warning')
+  })
+
+  it('keeps the surrounding text verbatim', () => {
+    expect(fillDetail('of {breach} breached, {warning} at risk', rows, cols))
+      .toBe('of 2 breached, 0 at risk')
+  })
+
+  it('renders zero rather than treating it as missing', () => {
+    expect(fillDetail('{warning}', rows, cols)).toBe('0')
+  })
+
+  it('shows an em dash for a column that is not in the query', () => {
+    // a typo should look like missing data, not like broken markup
+    expect(fillDetail('{on_trak} on track', rows, cols)).toBe('— on track')
+  })
+
+  it('returns empty string when no template is set', () => {
+    expect(fillDetail('', rows, cols)).toBe('')
+    expect(fillDetail(undefined, rows, cols)).toBe('')
+    expect(fillDetail('   ', rows, cols)).toBe('')
+  })
+
+  it('passes non-templated text through untouched', () => {
+    expect(fillDetail('no placeholders here', rows, cols)).toBe('no placeholders here')
+  })
+
+  it('tolerates whitespace inside the braces', () => {
+    expect(fillDetail('{ breach }', rows, cols)).toBe('2')
+  })
+
+  it('carries string columns through', () => {
+    expect(fillDetail('as of {label}', rows, cols)).toBe('as of today')
+  })
+
+  it('applies the formatter to numbers', () => {
+    expect(fillDetail('{on_track}', rows, cols, {}, (v) => `${v}!`)).toBe('13!')
+  })
+
+  it('reduces with the same aggregate as the headline value', () => {
+    // two numbers on one tile counted different ways would mislead
+    const many = [{ a: 1, b: 10 }, { a: 2, b: 20 }, { a: 3, b: 30 }]
+    const c = ['a', 'b']
+    expect(fillDetail('{b}', many, c, { aggregate: 'sum' })).toBe('60')
+    expect(fillDetail('{b}', many, c, { aggregate: 'avg' })).toBe('20')
+    expect(fillDetail('{b}', many, c, { aggregate: 'last' })).toBe('30')
+    expect(fillDetail('{b}', many, c, { aggregate: 'count' })).toBe('3')
+  })
+
+  it('survives an empty result set', () => {
+    expect(fillDetail('{on_track} open', [], cols)).toBe('— open')
+  })
+
+  it('never aggregates a text column', () => {
+    // regression: summing strings produced 0, which looked like a measurement
+    const many = [{ n: 1, s: 'first' }, { n: 2, s: 'gagal' }]
+    const c = ['n', 's']
+    for (const aggregate of ['sum', 'avg', 'min', 'max', 'last', 'count']) {
+      expect(fillDetail('{s}', many, c, { aggregate })).toBe('gagal')
+    }
+    expect(fillDetail('{n}', many, c, { aggregate: 'sum' })).toBe('3')
+  })
+
+  it('shows an em dash for a blank text value', () => {
+    expect(fillDetail('{s}', [{ s: '' }], ['s'])).toBe('—')
+    expect(fillDetail('{s}', [{ s: null }], ['s'])).toBe('—')
+  })
+
+  it('does not leave braces on screen for a repeated placeholder', () => {
+    expect(fillDetail('{breach} and {breach}', rows, cols)).toBe('2 and 2')
+  })
+})
+
+describe('buildOptions passes date_diff through', () => {
+  it('sends a configured date column', () => {
+    const opts = buildOptions({
+      options: { date_diff: [{ column: 'expire', as: 'days_left', unit: 'days' }] },
+    })
+    expect(opts.date_diff).toEqual([{ column: 'expire', as: 'days_left', unit: 'days' }])
+  })
+
+  it('drops half-filled rows left behind by the form', () => {
+    const opts = buildOptions({
+      options: { date_diff: [{ column: 'expire' }, { column: '', as: 'x' }, {}] },
+    })
+    expect(opts.date_diff).toEqual([{ column: 'expire' }])
+  })
+
+  it('omits the key entirely when nothing is configured', () => {
+    expect(buildOptions({ options: {} }).date_diff).toBeUndefined()
+    expect(buildOptions({ options: { date_diff: [] } }).date_diff).toBeUndefined()
   })
 })

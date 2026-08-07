@@ -13,7 +13,7 @@ from app.connectors.sql_db import (  # noqa: E402
     build_url, quote_identifier, validate_query, _wrap_with_filters,
 )
 from app.secrets_store import (  # noqa: E402
-    MASK, decrypt_config, encrypt_config, mask_config, merge_masked,
+    CLEAR, MASK, decrypt_config, encrypt_config, mask_config, merge_masked,
 )
 
 passed = failed = 0
@@ -75,6 +75,37 @@ check("mask hides the token", masked["app_token"], MASK)
 check("mask hides header values", masked["headers"]["Authorization"], MASK)
 check("mask keeps non-secrets", masked["base_url"], CONFIG["base_url"])
 check("empty secrets are not masked", mask_config({"app_token": ""})["app_token"], "")
+
+print("secrets are never wiped by accident")
+# Losing a stored credential silently is the worst outcome here: the source
+# keeps working until the next cache miss, then every widget on it fails.
+for label, sent in [
+    ("a blank field leaves it alone", ""),
+    ("a missing key leaves it alone", None),
+    ("the mask leaves it alone", MASK),
+]:
+    incoming = dict(CONFIG)
+    if sent is None:
+        incoming.pop("app_token")
+    else:
+        incoming["app_token"] = sent
+    kept = decrypt_config(encrypt_config(merge_masked(enc, incoming)))["app_token"]
+    check(label, kept, "app-secret-123")
+
+check("an explicit clear does remove it",
+      decrypt_config(encrypt_config(merge_masked(enc, {**CONFIG, "app_token": CLEAR})))["app_token"],
+      "")
+check("a new value replaces it",
+      decrypt_config(encrypt_config(merge_masked(enc, {**CONFIG, "app_token": "rotated"})))["app_token"],
+      "rotated")
+check("a first save with no stored secret still stores it",
+      decrypt_config(encrypt_config(merge_masked({}, {"password": "brand-new"})))["password"],
+      "brand-new")
+check("header values survive a blank edit",
+      decrypt_config(encrypt_config(merge_masked(
+          enc, {**CONFIG, "headers": {"Authorization": "", "Accept": "application/json"}}
+      )))["headers"]["Authorization"],
+      "Bearer xyz")
 
 merged = merge_masked(enc, {"base_url": "http://new/", "app_token": MASK, "user_token": "rotated"})
 check("masked value keeps the stored secret", merged["app_token"], enc["app_token"])

@@ -3,9 +3,13 @@ import {
   X, Plus, ChevronDown, ChevronRight, AlignLeft, AlignCenter, AlignRight,
 } from 'lucide-react'
 import { TONES } from '../tableRules'
+import { templateColumns } from '../links'
 
 export default function WidgetConfigModal({
   widget, sources, onSave, onClose, dashboardList = [], currentDashboardId,
+  // columns from this widget's most recent fetch, when it has one — lets the
+  // form flag a mistyped {placeholder} instead of leaving it to the dashboard
+  availableColumns = [],
 }) {
   const [title, setTitle] = useState(widget?.title || '')
   const [type, setType] = useState(widget?.type || 'line')
@@ -36,6 +40,12 @@ export default function WidgetConfigModal({
 
   const source = sources.find((s) => s.id === Number(datasourceId))
   const setOpt = (k, v) => setOpts((o) => ({ ...o, [k]: v }))
+
+  /** Patch one date_diff entry, leaving the others alone. */
+  const setDateDiff = (index, patch) => setOpts((o) => ({
+    ...o,
+    date_diff: (o.date_diff || []).map((d, i) => (i === index ? { ...d, ...patch } : d)),
+  }))
   const setFilter = (i, patch) =>
     setFilters((rows) => rows.map((r, j) => (j === i ? { ...r, ...patch } : r)))
   const setRule = (i, patch) =>
@@ -256,6 +266,48 @@ export default function WidgetConfigModal({
             <label>Rename columns <span className="optional">(old=new, comma separated)</span></label>
             <input value={renameText} onChange={(e) => setRenameText(e.target.value)}
               placeholder="states_id=Status, locations_id=Location" />
+          </>
+        )}
+
+        {source?.type === 'truewatch' && (
+          <>
+            <label>Query type</label>
+            <select value={opts.qtype || 'dql'} onChange={(e) => setOpt('qtype', e.target.value)}>
+              <option value="dql">DQL</option>
+              <option value="promql">PromQL</option>
+            </select>
+            <label>{(opts.qtype || 'dql') === 'promql' ? 'PromQL query' : 'DQL query'}</label>
+            <textarea rows={3} value={opts.query || ''} required
+              onChange={(e) => setOpt('query', e.target.value)}
+              placeholder={(opts.qtype || 'dql') === 'promql'
+                ? 'rate(http_requests_total[5m])'
+                : 'M::`cpu`:(avg(`usage_idle`)) BY `host`'} />
+            <p className="hint">
+              Namespaces: <code>M::</code> metrics, <code>L::</code> logs, <code>T::</code> tracing,
+              <code>R::</code> RUM, <code>O::</code> objects, <code>E::</code> events.
+              BY groups become extra columns.
+            </p>
+            <div className="field-row">
+              <div style={{ flex: 1 }}>
+                <label>Look-back (minutes)</label>
+                <input type="number" min="1" value={opts.range_minutes || ''}
+                  onChange={(e) => setOpt('range_minutes', e.target.value)} placeholder="60" />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label>Interval (seconds)</label>
+                <input type="number" min="1" value={opts.interval || ''}
+                  onChange={(e) => setOpt('interval', e.target.value)} placeholder="auto" />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label>Max points</label>
+                <input type="number" min="1" value={opts.max_points || ''}
+                  onChange={(e) => setOpt('max_points', e.target.value)} placeholder="360" />
+              </div>
+            </div>
+            <p className="hint">
+              A DQL time window written in the query itself, like <code>[1h]</code>, wins over
+              the look-back.
+            </p>
           </>
         )}
 
@@ -489,6 +541,52 @@ export default function WidgetConfigModal({
             <input type="number" min="12" max="120" value={opts.value_size ?? ''}
               placeholder="28" onChange={(e) => setOpt('value_size', e.target.value)} />
 
+            <label style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+              <input type="checkbox" style={{ width: 'auto' }}
+                checked={Boolean(opts.sparkline)}
+                onChange={(e) => setOpt('sparkline', e.target.checked)} />
+              Show a sparkline
+            </label>
+            <p className="hint">
+              Needs a query that returns one row per time bucket, oldest first —
+              e.g. <code>GROUP BY DATE_TRUNC(&apos;hour&apos;, ts) ORDER BY 1</code>.
+              The last row becomes the big number and the whole series draws the line.
+            </p>
+            {opts.sparkline && (
+              <>
+                <label>Sparkline column <span className="optional">(blank = the value column)</span></label>
+                <input value={opts.spark_field || ''} placeholder=""
+                  onChange={(e) => setOpt('spark_field', e.target.value)} />
+              </>
+            )}
+
+            <label>Supporting numbers <span className="optional">(optional)</span></label>
+            <input value={opts.detail || ''}
+              placeholder="{on_track} on track · {warning} warning"
+              onChange={(e) => setOpt('detail', e.target.value)} />
+            <p className="hint">
+              Free text with <code>{'{column}'}</code> placeholders, filled from this same
+              query. Lets one tile answer &quot;is that number bad?&quot; without a drill-down.
+            </p>
+            {(() => {
+              const used = templateColumns(opts.detail)
+              if (!used.length) return null
+              // Warn about typos while editing rather than rendering an em dash
+              // on the dashboard and leaving them to wonder why.
+              const known = availableColumns
+              const unknown = known.length ? used.filter((c) => !known.includes(c)) : []
+              return (
+                <p className="hint">
+                  {unknown.length
+                    ? <span className="danger-text">
+                        Not in this query: {unknown.join(', ')}
+                        {known.length ? ` — available: ${known.join(', ')}` : ''}
+                      </span>
+                    : `Using: ${used.join(', ')}`}
+                </p>
+              )
+            })()}
+
             <label>Compare against <span className="optional">(shows a trend arrow)</span></label>
             <select value={opts.compare_field ? 'field' : (opts.compare_mode || 'none')}
               onChange={(e) => {
@@ -688,6 +786,44 @@ export default function WidgetConfigModal({
 
         {showAdvanced && (
           <div className="subsection">
+            <label>Turn a date into a number
+              <span className="optional"> — for expiry and age</span>
+            </label>
+            {(opts.date_diff || []).map((d, i) => (
+              <div className="field-row" key={i} style={{ marginBottom: 6 }}>
+                <input style={{ flex: 2 }} value={d.column || ''} placeholder="expire"
+                  onChange={(e) => setDateDiff(i, { column: e.target.value })} />
+                <select style={{ flex: 1.2 }} value={d.direction || 'until'}
+                  onChange={(e) => setDateDiff(i, { direction: e.target.value })}>
+                  <option value="until">until (expiry)</option>
+                  <option value="since">since (age)</option>
+                </select>
+                <select style={{ width: 96 }} value={d.unit || 'days'}
+                  onChange={(e) => setDateDiff(i, { unit: e.target.value })}>
+                  <option value="days">days</option>
+                  <option value="hours">hours</option>
+                  <option value="minutes">minutes</option>
+                </select>
+                <input style={{ flex: 1.3 }} value={d.as || ''} placeholder="days_left"
+                  onChange={(e) => setDateDiff(i, { as: e.target.value })} />
+                <button type="button" className="danger ghost small icon" aria-label="Remove"
+                  onClick={() => setOpt('date_diff', opts.date_diff.filter((_, j) => j !== i))}>
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+            <button type="button" className="link"
+              onClick={() => setOpt('date_diff', [...(opts.date_diff || []),
+                { column: '', as: '', unit: 'days', direction: 'until' }])}>
+              <Plus size={13} /> Add a date column
+            </button>
+            <p className="hint">
+              Adds a numeric column you can threshold, colour and sort on — a date
+              cannot be. Negative means already past, so an expired licence reads
+              as <code>-294</code>. Rows with no date stay empty rather than
+              counting as zero.
+            </p>
+
             <label>Split columns into rows <span className="optional">(unpivot)</span></label>
             <input value={unpivotText} onChange={(e) => setUnpivotText(e.target.value)}
               placeholder="sukses, gagal" />

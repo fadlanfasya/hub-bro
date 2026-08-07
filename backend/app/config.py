@@ -72,6 +72,12 @@ class Settings:
     # only from real widget fetches.
     HEALTH_CHECK_INTERVAL: int = _int("HEALTH_CHECK_INTERVAL", 300)
 
+    # How often the alert scheduler wakes up, in seconds. Each rule still
+    # honours its own interval; this is just the granularity. 0 disables
+    # alerting entirely (rules stay saved but are never evaluated).
+    ALERT_TICK_SECONDS: int = _int("ALERT_TICK_SECONDS", 30)
+    ALERTS_ENABLED: bool = _bool("ALERTS_ENABLED", True)
+
     # --- serving the built frontend ---
     # When this directory holds a build, the API also serves the UI on the same
     # port. Empty in development, where Vite serves it instead.

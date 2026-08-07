@@ -17,6 +17,12 @@ ADDED_COLUMNS = {
     "dashboards": {
         "share_token": "VARCHAR",
         "version": "INTEGER DEFAULT 1",
+        # existing content stays visible to everyone — turning privacy on by
+        # default would make colleagues' dashboards vanish on upgrade
+        "visibility": "VARCHAR DEFAULT 'workspace'",
+    },
+    "datasources": {
+        "visibility": "VARCHAR DEFAULT 'workspace'",
     },
     "users": {
         "role": "VARCHAR DEFAULT 'viewer'",

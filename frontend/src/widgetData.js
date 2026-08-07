@@ -24,6 +24,9 @@ export function buildOptions(widget, dashboardRange, crossFilters) {
 
   // transforms, applied server-side after the fetch
   if (o.unpivot?.columns?.length) opts.unpivot = o.unpivot
+  // date_diff runs before filters server-side, so a filter can reference the
+  // column it produces
+  if (o.date_diff?.length) opts.date_diff = o.date_diff.filter((d) => d?.column)
   if (o.filters?.length) opts.filters = o.filters
   if (o.group_by) {
     opts.group_by = o.group_by
@@ -75,6 +78,41 @@ export function computeStat(rows, columns, opts = {}) {
 
   if (typeof value === 'number') value = Math.round(value * 100) / 100
   return { field, value }
+}
+
+/**
+ * Fill a stat widget's supporting line from the same result row.
+ *
+ * `template` is free text with {column} placeholders, e.g.
+ *   "{on_track} on track · {warning} warning"
+ *
+ * Each placeholder is reduced with the widget's own aggregate, so a detail line
+ * next to a summed value shows summed siblings rather than one arbitrary row —
+ * two numbers on the same tile counted different ways would be worse than no
+ * detail at all.
+ *
+ * An unknown column renders as an em dash instead of leaving {braces} on
+ * screen: a typo should look like missing data, not like broken markup.
+ */
+export function fillDetail(template, rows, columns, opts = {}, format = String) {
+  if (typeof template !== 'string' || !template.trim()) return ''
+  return template.replace(/\{([^}]+)\}/g, (_, raw) => {
+    const name = raw.trim()
+    if (!columns.includes(name)) return '—'
+    if (!rows.length) return '—'
+
+    // Only numbers get aggregated. Summing a text column ("gagal", "today")
+    // yields 0, which reads as a real measurement rather than a mistake — so
+    // text is taken from the last row instead.
+    const isNumeric = rows.some((r) => typeof r[name] === 'number')
+    if (!isNumeric) {
+      const last = rows[rows.length - 1][name]
+      return last === null || last === undefined || last === '' ? '—' : String(last)
+    }
+
+    const { value } = computeStat(rows, columns, { ...opts, value_field: name })
+    return typeof value === 'number' ? format(value) : String(value ?? '—')
+  })
 }
 
 /** Columns a table widget should render, honouring an explicit selection. */

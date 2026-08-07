@@ -10,7 +10,11 @@ import { data as dataApi, publicApi } from '../api'
 import { describeThreshold, evaluateThreshold } from '../thresholds'
 import { computeTrend, formatStatValue, formatTrend } from '../format'
 
-import { buildOptions, computeStat, resolveChartFields, visibleColumns } from '../widgetData'
+import { seriesFor } from '../sparkline'
+import {
+  buildOptions, computeStat, fillDetail, resolveChartFields, visibleColumns,
+} from '../widgetData'
+import Sparkline from './Sparkline'
 import Gauge from './Gauge'
 import Markdown from './Markdown'
 import {
@@ -320,6 +324,20 @@ function WidgetPlot({ widget, result, selection, onSelect }) {
               {opts.compare_label && <span className="stat-trend-label">{opts.compare_label}</span>}
             </div>
           )
+        })()}
+        {opts.sparkline && (() => {
+          // One query serves both: the last bucket is the headline number, the
+          // whole series is the shape. Needs a time-ordered, multi-row result.
+          const series = seriesFor(rows, opts.spark_field || field)
+          return series.length > 1 ? (
+            <Sparkline values={series} higherIsBetter={opts.higher_is_better !== false} />
+          ) : null
+        })()}
+        {(() => {
+          // supporting numbers from the same query — "13 on track · 0 warning"
+          const detail = fillDetail(opts.detail, rows, columns, opts,
+                                    (v) => formatStatValue(v, opts))
+          return detail ? <div className="stat-detail">{detail}</div> : null
         })()}
         {level && level !== 'ok' && (
           <div className={`status-pill ${level === 'critical' ? 'error' : 'warn'}`} title={reason}>

@@ -1,16 +1,21 @@
-"""Dashboards are workspace-wide: every signed-in user can see them, and
-editors/admins can change them. `owner_id` records who created one.
+"""Dashboards default to workspace-wide, and can be made private and shared
+with named people. `owner_id` records who created one; see access.py for the
+rules on who may see, edit and re-share it.
 """
 import json
 import secrets
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from .. import access
 from ..auth import get_current_user
 from ..database import get_db
-from ..models import Dashboard, DashboardSnapshot, User
+from ..models import (
+    VISIBILITIES, VISIBILITY_WORKSPACE, Dashboard, DashboardMember, DashboardSnapshot, User,
+)
 from ..permissions import require_dashboard_edit
 from ..schemas import DashboardCreate, DashboardOut, DashboardUpdate, SnapshotOut
 
@@ -23,7 +28,8 @@ MAX_SNAPSHOTS = 50
 
 def _to_out(d: Dashboard) -> DashboardOut:
     return DashboardOut(id=d.id, name=d.name, definition=json.loads(d.definition),
-                        share_token=d.share_token, version=d.version or 1)
+                        share_token=d.share_token, version=d.version or 1,
+                        visibility=d.visibility or "workspace", owner_id=d.owner_id)
 
 
 def _snapshot(d: Dashboard, user: User, db: Session, note: str | None = None):
@@ -63,21 +69,60 @@ def _get(dashboard_id: int, db: Session) -> Dashboard:
     return d
 
 
+def _readable(dashboard_id: int, user: User, db: Session) -> Dashboard:
+    d = _get(dashboard_id, db)
+    if not access.can_view_dashboard(db, user, d):
+        # 404 rather than 403: telling someone a dashboard exists but is closed
+        # to them leaks its existence and its id
+        raise HTTPException(status_code=404, detail="Dashboard not found")
+    return d
+
+
+def _writable(dashboard_id: int, user: User, db: Session) -> Dashboard:
+    d = _readable(dashboard_id, user, db)
+    if not access.can_edit_dashboard(db, user, d):
+        raise HTTPException(status_code=403, detail="You have read-only access to this dashboard")
+    return d
+
+
+def _manageable(dashboard_id: int, user: User, db: Session) -> Dashboard:
+    d = _readable(dashboard_id, user, db)
+    if not access.can_manage_dashboard(db, user, d):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the owner or an admin can change sharing for this dashboard",
+        )
+    return d
+
+
 @router.get("", response_model=list[DashboardOut])
-def list_dashboards(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return [_to_out(d) for d in db.query(Dashboard).order_by(Dashboard.id).all()]
+def list_dashboards(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    rows = access.visible_dashboards(db, user).order_by(Dashboard.id).all()
+    return [_to_out(d) for d in rows]
 
 
 @router.get("/{dashboard_id}", response_model=DashboardOut)
-def get_dashboard(dashboard_id: int, _: User = Depends(get_current_user),
+def get_dashboard(dashboard_id: int, user: User = Depends(get_current_user),
                   db: Session = Depends(get_db)):
-    return _to_out(_get(dashboard_id, db))
+    return _to_out(_readable(dashboard_id, user, db))
+
+
+@router.get("/{dashboard_id}/access")
+def dashboard_access(dashboard_id: int, user: User = Depends(get_current_user),
+                     db: Session = Depends(get_db)):
+    """What this user may do here — so the UI hides controls it would reject."""
+    d = _readable(dashboard_id, user, db)
+    return access.describe_dashboard_access(db, user, d)
 
 
 @router.post("", response_model=DashboardOut)
 def create_dashboard(payload: DashboardCreate, user: User = Depends(require_dashboard_edit),
                      db: Session = Depends(get_db)):
-    d = Dashboard(name=payload.name, owner_id=user.id)
+    visibility = payload.visibility or VISIBILITY_WORKSPACE
+    if visibility not in VISIBILITIES:
+        raise HTTPException(status_code=400,
+                            detail=f"Visibility must be one of {list(VISIBILITIES)}")
+    d = Dashboard(name=payload.name, owner_id=user.id, visibility=visibility)
     db.add(d)
     db.commit()
     db.refresh(d)
@@ -88,7 +133,7 @@ def create_dashboard(payload: DashboardCreate, user: User = Depends(require_dash
 def update_dashboard(dashboard_id: int, payload: DashboardUpdate,
                      user: User = Depends(require_dashboard_edit),
                      db: Session = Depends(get_db)):
-    d = _get(dashboard_id, db)
+    d = _writable(dashboard_id, user, db)
     current = d.version or 1
 
     # Reject a save based on a stale copy. Without this the later write simply
@@ -116,9 +161,9 @@ def update_dashboard(dashboard_id: int, payload: DashboardUpdate,
 
 
 @router.get("/{dashboard_id}/history", response_model=list[SnapshotOut])
-def list_history(dashboard_id: int, _: User = Depends(require_dashboard_edit),
+def list_history(dashboard_id: int, user: User = Depends(require_dashboard_edit),
                  db: Session = Depends(get_db)):
-    _get(dashboard_id, db)
+    _writable(dashboard_id, user, db)
     snapshots = (db.query(DashboardSnapshot)
                  .filter(DashboardSnapshot.dashboard_id == dashboard_id)
                  .order_by(DashboardSnapshot.id.desc()).all())
@@ -139,7 +184,7 @@ def list_history(dashboard_id: int, _: User = Depends(require_dashboard_edit),
 def restore_snapshot(dashboard_id: int, snapshot_id: int,
                      user: User = Depends(require_dashboard_edit),
                      db: Session = Depends(get_db)):
-    d = _get(dashboard_id, db)
+    d = _writable(dashboard_id, user, db)
     snapshot = (db.query(DashboardSnapshot)
                 .filter(DashboardSnapshot.id == snapshot_id,
                         DashboardSnapshot.dashboard_id == dashboard_id).first())
@@ -160,10 +205,12 @@ def restore_snapshot(dashboard_id: int, snapshot_id: int,
 @router.post("/{dashboard_id}/duplicate", response_model=DashboardOut)
 def duplicate_dashboard(dashboard_id: int, user: User = Depends(require_dashboard_edit),
                         db: Session = Depends(get_db)):
-    original = _get(dashboard_id, db)
-    # a copy is private even if the original is shared
+    original = _readable(dashboard_id, user, db)
+    # The copy inherits the original's visibility but none of its memberships:
+    # you become the owner, and the people it was shared with are not carried
+    # over silently. A private original stays private in the copy.
     copy = Dashboard(name=f"{original.name} (copy)", definition=original.definition,
-                     owner_id=user.id)
+                     owner_id=user.id, visibility=original.visibility or "workspace")
     db.add(copy)
     db.commit()
     db.refresh(copy)
@@ -171,10 +218,10 @@ def duplicate_dashboard(dashboard_id: int, user: User = Depends(require_dashboar
 
 
 @router.post("/{dashboard_id}/share", response_model=DashboardOut)
-def share_dashboard(dashboard_id: int, _: User = Depends(require_dashboard_edit),
+def share_dashboard(dashboard_id: int, user: User = Depends(require_dashboard_edit),
                     db: Session = Depends(get_db)):
     """Create (or return) a read-only public link for this dashboard."""
-    d = _get(dashboard_id, db)
+    d = _manageable(dashboard_id, user, db)
     if not d.share_token:
         d.share_token = secrets.token_urlsafe(24)
         db.commit()
@@ -183,10 +230,10 @@ def share_dashboard(dashboard_id: int, _: User = Depends(require_dashboard_edit)
 
 
 @router.delete("/{dashboard_id}/share", response_model=DashboardOut)
-def unshare_dashboard(dashboard_id: int, _: User = Depends(require_dashboard_edit),
+def unshare_dashboard(dashboard_id: int, user: User = Depends(require_dashboard_edit),
                       db: Session = Depends(get_db)):
     """Revoke the public link. Any existing URL stops working immediately."""
-    d = _get(dashboard_id, db)
+    d = _manageable(dashboard_id, user, db)
     d.share_token = None
     db.commit()
     db.refresh(d)
@@ -194,9 +241,103 @@ def unshare_dashboard(dashboard_id: int, _: User = Depends(require_dashboard_edi
 
 
 @router.delete("/{dashboard_id}")
-def delete_dashboard(dashboard_id: int, _: User = Depends(require_dashboard_edit),
+def delete_dashboard(dashboard_id: int, user: User = Depends(require_dashboard_edit),
                      db: Session = Depends(get_db)):
-    d = _get(dashboard_id, db)
-    db.delete(d)   # snapshots cascade with it
+    d = _manageable(dashboard_id, user, db)
+    db.delete(d)   # snapshots and memberships cascade with it
+    db.commit()
+    return {"ok": True}
+
+
+# --------------------------------------------------------------------------
+# sharing with named people
+# --------------------------------------------------------------------------
+
+class VisibilityIn(BaseModel):
+    visibility: str
+
+
+class MemberIn(BaseModel):
+    email: str
+    role: str = "viewer"
+
+
+@router.put("/{dashboard_id}/visibility", response_model=DashboardOut)
+def set_visibility(dashboard_id: int, body: VisibilityIn,
+                   user: User = Depends(require_dashboard_edit),
+                   db: Session = Depends(get_db)):
+    d = _manageable(dashboard_id, user, db)
+    if body.visibility not in VISIBILITIES:
+        raise HTTPException(status_code=400,
+                            detail=f"Visibility must be one of {list(VISIBILITIES)}")
+    d.visibility = body.visibility
+    db.commit()
+    db.refresh(d)
+    return _to_out(d)
+
+
+@router.get("/{dashboard_id}/members")
+def list_members(dashboard_id: int, user: User = Depends(get_current_user),
+                 db: Session = Depends(get_db)):
+    _readable(dashboard_id, user, db)
+    rows = (db.query(DashboardMember, User)
+            .join(User, User.id == DashboardMember.user_id)
+            .filter(DashboardMember.dashboard_id == dashboard_id).all())
+    return [access.member_out(m, u) for m, u in rows]
+
+
+@router.post("/{dashboard_id}/members")
+def add_member(dashboard_id: int, body: MemberIn,
+               user: User = Depends(require_dashboard_edit),
+               db: Session = Depends(get_db)):
+    d = _manageable(dashboard_id, user, db)
+
+    invitee = db.query(User).filter(User.email == body.email.strip().lower()).first()
+    if not invitee:
+        raise HTTPException(
+            status_code=404,
+            detail="No account with that email. An admin creates accounts under Users.",
+        )
+    if not invitee.is_active:
+        raise HTTPException(status_code=400, detail="That account is deactivated")
+    if invitee.id == d.owner_id:
+        raise HTTPException(status_code=400, detail="They already own this dashboard")
+
+    role = access.normalize_member_role(body.role)
+    existing = (db.query(DashboardMember)
+                .filter(DashboardMember.dashboard_id == dashboard_id,
+                        DashboardMember.user_id == invitee.id).first())
+    if existing:
+        existing.role = role
+        member = existing
+    else:
+        member = DashboardMember(dashboard_id=dashboard_id, user_id=invitee.id, role=role)
+        db.add(member)
+    db.commit()
+    db.refresh(member)
+
+    out = access.member_out(member, invitee)
+    # An invite is meaningless while the dashboard is workspace-wide, and a
+    # silent no-op is worse than saying so.
+    if (d.visibility or "workspace") == "workspace":
+        out["note"] = ("This dashboard is visible to the whole workspace, so this "
+                       "invite has no effect yet. Set it to private to limit access.")
+    if invitee.role == "viewer" and role == "editor":
+        out["note"] = ("Their account role is Viewer, so they will still have "
+                       "read-only access. An admin can change their role under Users.")
+    return out
+
+
+@router.delete("/{dashboard_id}/members/{user_id}")
+def remove_member(dashboard_id: int, user_id: int,
+                  user: User = Depends(require_dashboard_edit),
+                  db: Session = Depends(get_db)):
+    _manageable(dashboard_id, user, db)
+    member = (db.query(DashboardMember)
+              .filter(DashboardMember.dashboard_id == dashboard_id,
+                      DashboardMember.user_id == user_id).first())
+    if not member:
+        raise HTTPException(status_code=404, detail="Not shared with that person")
+    db.delete(member)
     db.commit()
     return {"ok": True}

@@ -2,7 +2,7 @@ services:
   hubbro:
     # Published image, so a server only needs this file and .env — no source
     # checkout required:  docker compose pull && docker compose up -d
-    image: fadlanfasya/hub-bro:1.0
+    image: fadlanfasya/hub-bro:latest
     container_name: hub-bro
     restart: unless-stopped
 

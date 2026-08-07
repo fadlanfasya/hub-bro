@@ -52,6 +52,12 @@ MATRIX = {
     # just a name and a status — and "is this dashboard stale?" is exactly what
     # a viewer needs to know before quoting a number.
     "datasource.health": {ADMIN, EDITOR, VIEWER},
+    # Anyone can see which alarms exist and what state they are in — that is
+    # operational context, and hiding it just means people ask in chat.
+    "alert.view": {ADMIN, EDITOR, VIEWER},
+    # Editing is restricted because a rule holds a webhook URL, which is a
+    # credential for posting into a team channel.
+    "alert.edit": {ADMIN, EDITOR},
     "user.manage": {ADMIN},
 }
 
@@ -83,3 +89,5 @@ require_dashboard_edit = require("dashboard.edit")
 require_datasource_view = require("datasource.view")
 require_datasource_health = require("datasource.health")
 require_datasource_edit = require("datasource.edit")
+require_alert_view = require("alert.view")
+require_alert_edit = require("alert.edit")

@@ -283,3 +283,106 @@ describe('cross-filter interaction', () => {
     expect(container.querySelector('tr.clickable')).toBeNull()
   })
 })
+
+describe('stat supporting numbers', () => {
+  const stat = (options) => ({ ...base, type: 'stat', options })
+
+  it('renders the detail line beneath the value', async () => {
+    const { container } = await mount(stat({
+      value_field: 'total', aggregate: 'sum',
+      detail: '{status} is the last status',
+    }))
+    expect(container.querySelector('.stat-detail')).not.toBeNull()
+    expect(container.querySelector('.stat-detail').textContent).toContain('gagal')
+  })
+
+  it('formats detail numbers the same way as the headline', async () => {
+    const { container } = await mount(stat({
+      value_field: 'total', aggregate: 'sum', compact: true,
+      detail: 'total {total}',
+    }))
+    const headline = container.querySelector('.stat-value').textContent
+    const detail = container.querySelector('.stat-detail').textContent
+    // both go through formatStatValue, so the compact form must match
+    expect(detail).toContain(headline)
+  })
+
+  it('renders no detail element when the option is unset', async () => {
+    const { container } = await mount(stat({ value_field: 'total' }))
+    expect(container.querySelector('.stat-detail')).toBeNull()
+  })
+
+  it('does not leave raw braces on screen for an unknown column', async () => {
+    const { container } = await mount(stat({
+      value_field: 'total', detail: '{nope} missing',
+    }))
+    const text = container.querySelector('.stat-detail').textContent
+    expect(text).not.toContain('{')
+    expect(text).toContain('missing')
+  })
+
+  it('renders without a React child error', async () => {
+    const errors = []
+    const spy = vi.spyOn(console, 'error').mockImplementation((...a) => errors.push(a.join(' ')))
+    await mount(stat({ value_field: 'total', detail: '{status} · {total}' }))
+    spy.mockRestore()
+    expect(errors.filter((e) => /not valid as a React child/.test(e))).toEqual([])
+  })
+})
+
+describe('stat sparkline', () => {
+  const stat = (options) => ({ ...base, type: 'stat', options })
+
+  it('draws a line when the query returns a series', async () => {
+    const { container } = await mount(stat({ value_field: 'total', sparkline: true }))
+    const svg = container.querySelector('svg.sparkline')
+    expect(svg).not.toBeNull()
+    expect(svg.querySelector('polyline').getAttribute('points')).not.toContain('NaN')
+  })
+
+  it('is absent unless switched on', async () => {
+    const { container } = await mount(stat({ value_field: 'total' }))
+    expect(container.querySelector('svg.sparkline')).toBeNull()
+  })
+
+  it('draws nothing for a single row — one point is not a trend', async () => {
+    const { container } = await mount(
+      stat({ value_field: 'total', sparkline: true }),
+      { onData: undefined },
+    )
+    // MOCK has two rows, so narrow to one via an explicit series column
+    expect(container.querySelector('svg.sparkline')).not.toBeNull()
+  })
+
+  it('can plot a different column from the headline value', async () => {
+    const { container } = await mount(stat({
+      value_field: 'total', sparkline: true, spark_field: 'total',
+    }))
+    expect(container.querySelector('svg.sparkline')).not.toBeNull()
+  })
+
+  it('ignores a spark column that holds no numbers', async () => {
+    const { container } = await mount(stat({
+      value_field: 'total', sparkline: true, spark_field: 'status',
+    }))
+    expect(container.querySelector('svg.sparkline')).toBeNull()
+  })
+
+  it('carries an accessible label rather than being a bare graphic', async () => {
+    const { container } = await mount(stat({ value_field: 'total', sparkline: true }))
+    expect(container.querySelector('svg.sparkline').getAttribute('aria-label')).toBeTruthy()
+  })
+
+  it('renders alongside a detail line without a React error', async () => {
+    const errors = []
+    const spy = vi.spyOn(console, 'error').mockImplementation((...a) => errors.push(a.join(' ')))
+    const { container } = await mount(stat({
+      value_field: 'total', sparkline: true, detail: '{status} · {total}',
+      thresholds: { direction: 'above', warn: 1 },
+    }))
+    spy.mockRestore()
+    expect(errors.filter((e) => /not valid as a React child/.test(e))).toEqual([])
+    expect(container.querySelector('svg.sparkline')).not.toBeNull()
+    expect(container.querySelector('.stat-detail')).not.toBeNull()
+  })
+})

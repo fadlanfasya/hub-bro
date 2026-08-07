@@ -5,7 +5,7 @@ import time
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from .. import cache, health
+from .. import access, cache, health
 from ..auth import get_current_user
 from ..connectors import fetch_data
 from ..database import get_db
@@ -21,7 +21,7 @@ router = APIRouter(prefix="/api/data", tags=["data"])
 # different views of the same data.
 TRANSFORM_KEYS = {
     "unpivot", "filters", "cross_filters", "group_by", "aggregate", "value_column",
-    "sort", "limit",
+    "sort", "limit", "date_diff",
 }
 
 # Connectors that can filter server-side. For these, `filters` is sent to the
@@ -106,9 +106,15 @@ async def fetch_for_widget(dashboard_id: int, widget_id: str,
     Query options come from the stored dashboard, never from the request, so a
     viewer can read what a dashboard shows without being able to run arbitrary
     queries (an important difference for SQL sources).
+
+    Access is granted by the *dashboard*, not by the data source — someone
+    invited here reads these numbers without gaining any access to the source
+    behind them. That read-through is what makes sharing usable; see access.py.
     """
     dashboard = db.query(Dashboard).filter(Dashboard.id == dashboard_id).first()
     if not dashboard:
+        raise HTTPException(status_code=404, detail="Dashboard not found")
+    if not access.can_view_dashboard(db, user, dashboard):
         raise HTTPException(status_code=404, detail="Dashboard not found")
 
     definition = json.loads(dashboard.definition)
@@ -132,9 +138,14 @@ async def fetch(payload: DataFetchRequest,
 
     Restricted to editors and admins: the caller chooses the options, which for
     a SQL source means choosing the statement.
+
+    Unlike the widget route above, this requires access to the *source itself*.
+    Being shown a dashboard does not let you point its source at a different
+    table — that is the line between reading a report and holding a database
+    connection.
     """
     ds = db.query(DataSource).filter(DataSource.id == payload.datasource_id).first()
-    if not ds:
+    if not ds or not access.can_use_datasource(db, user, ds):
         raise HTTPException(status_code=404, detail="Data source not found")
 
     return await _run(ds, payload.options or {}, db)
@@ -145,8 +156,10 @@ def invalidate(datasource_id: int, _: User = Depends(get_current_user),
                db: Session = Depends(get_db)):
     """Drop cached responses for a source — used by the manual Refresh button.
 
-    Any signed-in user may do this: it only discards cached copies, and a
-    viewer needs it to force-refresh a dashboard they're watching.
+    Any signed-in user may do this, deliberately: it only discards cached
+    copies and returns nothing, so it reveals no data. A viewer watching a
+    dashboard built on a private source still needs to force a refresh, and
+    gating this on source access would break that for no security gain.
     """
     ds = db.query(DataSource).filter(DataSource.id == datasource_id).first()
     if not ds:

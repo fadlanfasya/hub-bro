@@ -556,6 +556,24 @@ table.data tbody tr.selected:hover td { background: var(--primary-soft); }
   font-size: 12.5px; font-weight: 500; margin-top: 2px;
   padding: 2px 8px; border-radius: var(--radius-pill);
 }
+/* Supporting numbers under the headline value. Deliberately quiet — it adds
+   context without competing with the number it sits beneath. */
+.stat-detail {
+  margin-top: 6px; font-size: 12px; color: var(--muted);
+  line-height: 1.45; max-width: 100%;
+}
+.widget.bg-solid .stat-detail { color: var(--widget-ink); opacity: .82; }
+
+/* Trend shape, not a chart: no axes, no labels, and quiet enough that the
+   number above it stays the thing you read first. */
+.sparkline { display: block; margin-top: 7px; overflow: visible; }
+.sparkline-path { stroke: var(--primary); opacity: .7; }
+.sparkline-dot { fill: var(--primary); }
+.sparkline-dot.tone-good { fill: var(--success); }
+.sparkline-dot.tone-bad { fill: var(--danger); }
+.widget.bg-solid .sparkline-path,
+.widget.bg-solid .sparkline-dot { stroke: var(--widget-ink); fill: var(--widget-ink); }
+
 .stat-trend.tone-good { color: var(--success); background: var(--success-soft); }
 .stat-trend.tone-bad { color: var(--danger); background: var(--danger-soft); }
 .stat-trend.tone-flat { color: var(--muted); background: var(--surface-2); }
@@ -788,6 +806,19 @@ button.status-pill.error { border: 0; cursor: pointer; }
   animation: modal-in .22s var(--ease-out);
 }
 .modal h3 { margin: 0 0 var(--space-2); font-size: 17px; }
+
+/* --- sharing --- */
+.visibility-choice { display: flex; gap: var(--space-2); }
+.visibility-choice button { flex: 1; justify-content: center; }
+.visibility-choice button.active {
+  border-color: var(--accent); color: var(--accent); background: var(--surface-2);
+}
+.member-list { list-style: none; margin: var(--space-2) 0 0; padding: 0; }
+.member-list li {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 13px;
+}
+.member-list li:last-child { border-bottom: none; }
 .modal-footer {
   display: flex; justify-content: flex-end; gap: var(--space-2);
   margin-top: var(--space-5); padding-top: var(--space-4); border-top: 1px solid var(--border);

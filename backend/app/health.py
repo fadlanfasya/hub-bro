@@ -72,6 +72,15 @@ async def _probe_glpi(config: dict) -> None:
     await _init_session(config)
 
 
+async def _probe_truewatch(config: dict) -> None:
+    from .connectors.truewatch import PING_PATH, client, endpoint_of, headers_for
+    # check_ping validates the API key as well as reachability, so a revoked
+    # key shows up as unhealthy instead of silently returning empty widgets
+    async with client(config) as http:
+        resp = await http.get(endpoint_of(config) + PING_PATH, headers=headers_for(config))
+        resp.raise_for_status()
+
+
 async def _probe_csv(config: dict) -> None:
     path = config.get("file_path")
     if not path or not os.path.exists(path):
@@ -83,6 +92,7 @@ PROBES = {
     "rest": _probe_rest,
     "prometheus": _probe_prometheus,
     "glpi": _probe_glpi,
+    "truewatch": _probe_truewatch,
     "csv": _probe_csv,
 }
 

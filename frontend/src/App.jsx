@@ -1,6 +1,6 @@
 import { Navigate, Route, Routes, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import {
-  LayoutDashboard, Database, LogOut, Sun, Moon, Users as UsersIcon, UserCircle, Activity,
+  LayoutDashboard, Database, LogOut, Sun, Moon, Users as UsersIcon, UserCircle, Activity, Bell,
 } from 'lucide-react'
 import Logo from './components/Logo'
 import Login from './pages/Login'
@@ -11,6 +11,7 @@ import DataSources from './pages/DataSources'
 import PublicDashboard from './pages/PublicDashboard'
 import Users from './pages/Users'
 import Health from './pages/Health'
+import Alerts from './pages/Alerts'
 import Account from './pages/Account'
 import { useTheme } from './useTheme'
 import { AuthProvider, useAuth, ROLE_LABELS } from './useAuth'
@@ -64,6 +65,11 @@ function Sidebar() {
             <Activity size={16} />{!rail && <span>Health</span>}
           </NavLink>
         )}
+        {can('alert.view') && (
+          <NavLink to="/alerts" className={navClass} title="Alerts">
+            <Bell size={16} />{!rail && <span>Alerts</span>}
+          </NavLink>
+        )}
         {can('user.manage') && (
           <NavLink to="/users" className={navClass} title="Users">
             <UsersIcon size={16} />{!rail && <span>Users</span>}
@@ -114,6 +120,9 @@ function AppRoutes() {
                 } />
                 <Route path="/health" element={
                   <RequireCapability capability="datasource.health"><Health /></RequireCapability>
+                } />
+                <Route path="/alerts" element={
+                  <RequireCapability capability="alert.view"><Alerts /></RequireCapability>
                 } />
                 <Route path="/users" element={
                   <RequireCapability capability="user.manage"><Users /></RequireCapability>

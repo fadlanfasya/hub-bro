@@ -1,22 +1,27 @@
 import { useEffect, useState } from 'react'
-import { Globe, FileSpreadsheet, Activity, Server, Table2, X, Plus, Database, Loader2, CheckCircle2, XCircle, Pencil, Trash2, Info } from 'lucide-react'
+import { Globe, FileSpreadsheet, Activity, Server, Table2, X, Plus, Database, Loader2, CheckCircle2, XCircle, Pencil, Trash2, Info, Eye, Lock, Users } from 'lucide-react'
 import { datasources, data } from '../api'
 import SecretField from '../components/SecretField'
+import SharePanel from '../components/SharePanel'
 import { useAuth } from '../useAuth'
 
 const TYPE_LABELS = {
   rest: 'REST API', csv: 'CSV file', prometheus: 'Prometheus', glpi: 'GLPI', sql: 'SQL database',
+  truewatch: 'TrueWatch',
 }
 const TYPE_ICONS = {
   rest: Globe, csv: FileSpreadsheet, prometheus: Activity, glpi: Server, sql: Table2,
+  truewatch: Eye,
 }
 const SOURCE_TYPES = [
   { key: 'rest', label: 'REST API' },
   { key: 'sql', label: 'SQL database (PostgreSQL / MySQL / SQLite)' },
   { key: 'glpi', label: 'GLPI' },
+  { key: 'truewatch', label: 'TrueWatch' },
   { key: 'prometheus', label: 'Prometheus' },
   { key: 'csv', label: 'CSV upload' },
 ]
+const TRUEWATCH_DEFAULT_ENDPOINT = 'https://openapi.truewatch.com'
 const MASK = '••••••••'
 // mirrors DEFAULT_PORTS in backend/app/connectors/sql_db.py
 const DEFAULT_PORTS = {
@@ -35,10 +40,16 @@ export default function DataSources() {
   const [verifySsl, setVerifySsl] = useState(true)
   const [sql, setSql] = useState({ driver: 'postgresql', host: '', port: '', database: '', user: '' })
   // secrets: null means "untouched, keep whatever is stored"; a string is a new value
-  const [secrets, setSecrets] = useState({ password: '', app_token: '', user_token: '' })
+  const [secrets, setSecrets] = useState({ password: '', app_token: '', user_token: '', api_key: '' })
   const [stored, setStored] = useState({})
+  const [workspaceUuids, setWorkspaceUuids] = useState('')
   const setSecret = (k, v) => setSecrets((s2) => ({ ...s2, [k]: v }))
   const [monitor, setMonitor] = useState(false)
+  const [visibility, setVisibility] = useState('private')
+  const [tokensInQuery, setTokensInQuery] = useState(false)
+  const [sharing, setSharing] = useState(null)
+  // only an admin may hand a source to the whole workspace
+  const canPublish = can('datasource.edit')
   const setSqlField = (k, v) => setSql((s) => ({ ...s, [k]: v }))
   const [file, setFile] = useState(null)
   const [error, setError] = useState('')
@@ -54,9 +65,12 @@ export default function DataSources() {
     setName(''); setUrl(''); setHeaderRows([{ key: '', value: '' }])
     setBaseUrl(''); setFile(null); setVerifySsl(true); setError('')
     setSql({ driver: 'postgresql', host: '', port: '', database: '', user: '' })
-    setSecrets({ password: '', app_token: '', user_token: '' })
+    setSecrets({ password: '', app_token: '', user_token: '', api_key: '' })
     setStored({})
+    setWorkspaceUuids('')
     setMonitor(false)
+    setVisibility(canPublish ? 'workspace' : 'private')
+    setTokensInQuery(false)
   }
 
   const startEdit = (ds) => {
@@ -64,7 +78,12 @@ export default function DataSources() {
     setType(ds.type)
     setName(ds.name)
     setUrl(ds.config.url || '')
-    setBaseUrl(ds.config.base_url || '')
+    setBaseUrl(ds.config.base_url || ds.config.endpoint || '')
+    setWorkspaceUuids(
+      Array.isArray(ds.config.workspace_uuids)
+        ? ds.config.workspace_uuids.join(', ')
+        : (ds.config.workspace_uuids || ''),
+    )
     setVerifySsl(ds.config.verify_ssl !== false)
     setSql({
       driver: ds.config.driver || 'postgresql',
@@ -77,9 +96,12 @@ export default function DataSources() {
       password: Boolean(ds.config.password),
       app_token: Boolean(ds.config.app_token),
       user_token: Boolean(ds.config.user_token),
+      api_key: Boolean(ds.config.api_key),
     })
-    setSecrets({ password: null, app_token: null, user_token: null })
+    setSecrets({ password: null, app_token: null, user_token: null, api_key: null })
     setMonitor(Boolean(ds.config.monitor))
+    setVisibility(ds.visibility || 'workspace')
+    setTokensInQuery(Boolean(ds.config.tokens_in_query))
     const rows = Object.entries(ds.config.headers || {}).map(([key, value]) => ({ key, value }))
     setHeaderRows(rows.length ? rows : [{ key: '', value: '' }])
     setFile(null)
@@ -105,6 +127,15 @@ export default function DataSources() {
         base_url: baseUrl,
         app_token: secretValue('app_token'),
         user_token: secretValue('user_token'),
+        tokens_in_query: tokensInQuery,
+        verify_ssl: verifySsl, monitor,
+      }
+    }
+    if (type === 'truewatch') {
+      return {
+        endpoint: baseUrl || TRUEWATCH_DEFAULT_ENDPOINT,
+        api_key: secretValue('api_key'),
+        workspace_uuids: workspaceUuids,
         verify_ssl: verifySsl, monitor,
       }
     }
@@ -118,14 +149,14 @@ export default function DataSources() {
     try {
       if (editingId) {
         await datasources.update(editingId, {
-          name,
+          name, visibility,
           config: type === 'csv' ? undefined : buildConfig(),
         })
       } else if (type === 'csv') {
         if (!file) return setError('Choose a CSV file')
-        await datasources.uploadCsv(name, file)
+        await datasources.uploadCsv(name, file, visibility)
       } else {
-        await datasources.create({ name, type, config: buildConfig() })
+        await datasources.create({ name, type, visibility, config: buildConfig() })
       }
       resetForm()
       load()
@@ -139,6 +170,7 @@ export default function DataSources() {
     try {
       const options = ds.type === 'prometheus' ? { query: 'up' }
         : ds.type === 'glpi' ? { itemtype: 'Computer', max_rows: 5 }
+        : ds.type === 'truewatch' ? { query: 'show_object_source()', limit: 5 }
         : ds.type === 'sql' ? { query: 'SELECT 1', limit: 1 } : {}
       const res = await data.fetch(ds.id, options)
       setTestResult({ id: ds.id, status: 'ok', rows: res.data.rows.length })
@@ -236,6 +268,49 @@ export default function DataSources() {
                 placeholder="Preferences → Remote access keys"
                 hint="Hub-Bro opens and refreshes the GLPI session for you." />
               <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer' }}>
+                <input type="checkbox" style={{ width: 'auto', marginTop: 2 }} checked={tokensInQuery}
+                  onChange={(e) => setTokensInQuery(e.target.checked)} />
+                <span>
+                  Send tokens in the URL instead of headers
+                  <span className="optional"> — for servers that strip headers before PHP sees them</span>
+                </span>
+              </label>
+              {tokensInQuery && (
+                <p className="hint">
+                  Fixes ERROR_SESSION_TOKEN_MISSING when Apache or nginx drops the
+                  Session-Token header. Note the tokens will then appear in the
+                  GLPI server&apos;s access log, so only use it if headers don&apos;t work.
+                </p>
+              )}
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer' }}>
+                <input type="checkbox" style={{ width: 'auto', marginTop: 2 }} checked={verifySsl}
+                  onChange={(e) => setVerifySsl(e.target.checked)} />
+                <span>Verify SSL certificate <span className="optional">— uncheck for self-signed servers</span></span>
+              </label>
+            </>
+          )}
+          {type === 'truewatch' && (
+            <>
+              <label>API endpoint</label>
+              <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)}
+                placeholder={TRUEWATCH_DEFAULT_ENDPOINT} />
+              <p className="hint">
+                Leave blank for the public SaaS endpoint. Use your own host for a
+                private deployment.
+              </p>
+              <SecretField label="API key" required
+                value={secrets.api_key} hasStored={stored.api_key}
+                onChange={(v) => setSecret('api_key', v)}
+                placeholder="Management → API Key"
+                hint="Sent as the DF-API-KEY header. It also decides which workspace you see." />
+              <label>Workspace UUIDs <span className="optional">— optional</span></label>
+              <input value={workspaceUuids} onChange={(e) => setWorkspaceUuids(e.target.value)}
+                placeholder="wksp_abc123, wksp_def456" />
+              <p className="hint">
+                Only for querying across workspaces you have been granted. Leave blank
+                for the key&apos;s own workspace.
+              </p>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer' }}>
                 <input type="checkbox" style={{ width: 'auto', marginTop: 2 }} checked={verifySsl}
                   onChange={(e) => setVerifySsl(e.target.checked)} />
                 <span>Verify SSL certificate <span className="optional">— uncheck for self-signed servers</span></span>
@@ -287,11 +362,6 @@ export default function DataSources() {
                     value={secrets.password} hasStored={stored.password}
                     onChange={(v) => setSecret('password', v)}
                     hint="Stored encrypted. Use a read-only account — Hub-Bro rejects anything but SELECT, but least privilege is still the right call." />
-                  )}
-                  <p className="hint">
-                    Stored encrypted. Use a read-only account — Hub-Bro rejects anything but SELECT,
-                    but least privilege is still the right call.
-                  </p>
                 </>
               )}
             </>
@@ -317,6 +387,22 @@ export default function DataSources() {
               </label>
             </>
           )}
+          {type !== 'csv' || !editingId ? (
+            <>
+              <label style={{ marginTop: 14 }}>Who can use this source</label>
+              <select value={visibility} onChange={(e) => setVisibility(e.target.value)}>
+                <option value="private">Private — just me and anyone I share it with</option>
+                <option value="workspace" disabled={!canPublish}>
+                  Everyone in the workspace{canPublish ? '' : ' (admins only)'}
+                </option>
+              </select>
+              <p className="hint">
+                {visibility === 'private'
+                  ? 'Others can still read dashboards built on it — they just cannot query it themselves.'
+                  : 'Anyone who builds widgets can run their own queries through this connection.'}
+              </p>
+            </>
+          ) : null}
           {error && <div className="error"><XCircle size={14} />{error}</div>}
           <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
             <button type="submit">{editingId ? 'Save changes' : 'Add source'}</button>
@@ -349,7 +435,15 @@ export default function DataSources() {
                       <span className="type-icon"><TypeIcon size={17} /></span>
                       <div style={{ minWidth: 0 }}>
                         <div className="name">{ds.name}</div>
-                        <div className="type">{TYPE_LABELS[ds.type]}</div>
+                        <div className="type">
+                          {TYPE_LABELS[ds.type]}
+                          {ds.visibility === 'private' && (
+                            <span className="status-pill" style={{ marginLeft: 8 }}
+                              title="Only you, people you share it with, and admins">
+                              <Lock size={10} /> Private
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                     <div className="detail">
@@ -359,8 +453,12 @@ export default function DataSources() {
                     </div>
                     <div className="actions">
                       <button className="secondary small" onClick={() => test(ds)}>Test</button>
-                      {canEdit && (
+                      {ds.can_edit && (
                       <>
+                      <button className="secondary small icon" aria-label="Sharing"
+                        title="Who can use this" onClick={() => setSharing(ds)}>
+                        <Users size={13} />
+                      </button>
                       <button className="secondary small icon" aria-label="Edit source" title="Edit source" onClick={() => startEdit(ds)}>
                         <Pencil size={13} />
                       </button>
@@ -390,6 +488,36 @@ export default function DataSources() {
           )}
         </div>
       </div>
+
+      {sharing && (
+        <div className="modal-overlay" onClick={() => setSharing(null)}>
+          <div className="card modal" onClick={(e) => e.stopPropagation()}>
+            <div className="page-header" style={{ marginBottom: 14 }}>
+              <h3 style={{ margin: 0 }}>Share “{sharing.name}”</h3>
+              <span className="spacer" />
+              <button className="secondary small icon" aria-label="Close"
+                onClick={() => setSharing(null)}>
+                <X size={14} />
+              </button>
+            </div>
+            <SharePanel
+              kind="source"
+              api={datasources}
+              id={sharing.id}
+              visibility={sharing.visibility || 'workspace'}
+              onVisibility={async (v) => {
+                try {
+                  await datasources.update(sharing.id, { visibility: v })
+                  setSharing({ ...sharing, visibility: v })
+                  load()
+                } catch (err) {
+                  setError(err.response?.data?.detail || 'Could not change visibility')
+                }
+              }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }

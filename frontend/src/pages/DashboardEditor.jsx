@@ -440,6 +440,7 @@ export default function DashboardEditor() {
             sources={sources}
             dashboardList={allDashboards}
             currentDashboardId={Number(id)}
+            availableColumns={widgetData.current[modal.widget?.id]?.columns || []}
             onSave={saveWidget}
             onClose={() => setModal(null)}
           />

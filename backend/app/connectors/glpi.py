@@ -60,34 +60,88 @@ def _client(config: dict) -> httpx.AsyncClient:
     )
 
 
+def _use_query_tokens(config: dict) -> bool:
+    """Send credentials in the query string instead of headers.
+
+    Some GLPI deployments sit behind a web server that does not pass custom or
+    Authorization headers through to PHP, so GLPI never sees the credentials and
+    reports the session as missing. Query parameters always arrive.
+
+    Off by default: a token in a URL ends up in the web server's access log,
+    which is a real cost. Only worth paying when headers demonstrably don't work.
+    """
+    return bool(config.get("tokens_in_query"))
+
+
 async def _init_session(config: dict) -> str:
-    base_url = (config.get("base_url") or "").rstrip("/")
-    app_token = config.get("app_token") or ""
-    user_token = config.get("user_token") or ""
+    # Trim: a token pasted with a trailing newline is otherwise rejected by the
+    # HTTP layer as an illegal header value, long before GLPI ever sees it.
+    base_url = (config.get("base_url") or "").strip().rstrip("/")
+    app_token = (config.get("app_token") or "").strip()
+    user_token = (config.get("user_token") or "").strip()
     if not base_url:
         raise ValueError("GLPI data source is missing base_url")
     if not user_token:
         raise ValueError("GLPI data source is missing user_token")
 
+    # No Content-Type: these requests carry no body. Declaring JSON on an empty
+    # body invites the server to look for parameters there and find none.
+    if _use_query_tokens(config):
+        params = {"app_token": app_token, "user_token": user_token}
+        headers = {}
+    else:
+        params = None
+        headers = {
+            "App-Token": app_token,
+            "Authorization": f"user_token {user_token}",
+        }
+
+    # POST first, GET as a fallback.
+    #
+    # GLPI documents initSession as a GET, but on some instances a GET is routed
+    # to the generic "get items of type X" handler, which demands a session
+    # token — producing ERROR_SESSION_TOKEN_MISSING on the one endpoint that
+    # needs no session. POST hits the login route reliably; older instances that
+    # only accept GET still work through the fallback.
     async with _client(config) as client:
-        resp = await client.get(
-            f"{base_url}/initSession",
-            headers={
-                "App-Token": app_token,
-                "Authorization": f"user_token {user_token}",
-                "Content-Type": "application/json",
-            },
-        )
+        resp = await client.post(f"{base_url}/initSession", params=params, headers=headers)
         if resp.status_code >= 400:
-            raise ValueError(f"GLPI initSession failed ({resp.status_code}): {resp.text[:200]}")
+            fallback = await client.get(f"{base_url}/initSession",
+                                        params=params, headers=headers)
+            if fallback.status_code < 400:
+                resp = fallback
+        if resp.status_code >= 400:
+            detail = resp.text[:200]
+            # initSession is the one endpoint that needs no session token, so
+            # being asked for one means GLPI never routed the request there.
+            # Almost always the URL or the web server, not the credentials.
+            if "SESSION_TOKEN" in detail.upper():
+                raise ValueError(
+                    f"GLPI did not recognise the login request ({resp.status_code}). "
+                    f"initSession needs no session token, so this usually means the "
+                    f"API URL is wrong or the web server is not passing the path "
+                    f"through. Check that the URL is exactly the apirest.php endpoint "
+                    f"with nothing after it, and that GLPI's API is enabled. "
+                    f"GLPI said: {detail}"
+                )
+            raise ValueError(f"GLPI initSession failed ({resp.status_code}): {detail}")
         token = resp.json().get("session_token")
         if not token:
             raise ValueError("GLPI initSession returned no session_token")
         return token
 
 
+def _session_key(config: dict) -> tuple:
+    return (config.get("base_url"), config.get("app_token"), config.get("user_token"))
+
+
+def _forget_session(config: dict):
+    """Drop a session we know the server has rejected."""
+    _sessions.pop(_session_key(config), None)
+
+
 async def _get_session(config: dict, force_new: bool = False) -> str:
-    key = (config.get("base_url"), config.get("app_token"), config.get("user_token"))
+    key = _session_key(config)
     async with _session_lock:
         cached = _sessions.get(key)
         if cached and not force_new and (time.time() - cached[1]) < SESSION_TTL:
@@ -97,24 +151,51 @@ async def _get_session(config: dict, force_new: bool = False) -> str:
         return token
 
 
+def _is_session_error(resp: httpx.Response) -> bool:
+    """Whether GLPI is complaining about the session rather than the request.
+
+    GLPI answers 400 for an expired or unknown session, not 401 — so keying the
+    retry on the status code alone meant a dead session surfaced as a hard
+    error. Some instances expire sessions within seconds, which looked like
+    "it works once, then breaks".
+    """
+    if resp is None or resp.status_code not in (400, 401, 403):
+        return False
+    body = (resp.text or "")[:400].upper()
+    return any(marker in body for marker in (
+        "ERROR_SESSION_TOKEN_MISSING",
+        "ERROR_SESSION_TOKEN_INVALID",
+        "ERROR_NOT_AUTHENTICATED",
+        "SESSION_TOKEN",
+    ))
+
+
 async def _request(config: dict, path: str, params: dict) -> httpx.Response:
-    """GET with a cached session, retrying once with a fresh session on 401."""
-    base_url = (config.get("base_url") or "").rstrip("/")
+    """GET with a cached session, re-authenticating once if the session died."""
+    base_url = (config.get("base_url") or "").strip().rstrip("/")
     resp = None
     for attempt in (0, 1):
         session_token = await _get_session(config, force_new=(attempt == 1))
+        if _use_query_tokens(config):
+            call_params = dict(params or {})
+            call_params["session_token"] = session_token
+            call_params["app_token"] = (config.get("app_token") or "").strip()
+            headers = {}
+        else:
+            call_params = params
+            headers = {
+                "App-Token": (config.get("app_token") or "").strip(),
+                "Session-Token": session_token,
+            }
         async with _client(config) as client:
             resp = await client.get(
-                f"{base_url}/{path.lstrip('/')}",
-                params=params,
-                headers={
-                    "App-Token": config.get("app_token") or "",
-                    "Session-Token": session_token,
-                    "Content-Type": "application/json",
-                },
+                f"{base_url}/{path.lstrip('/')}", params=call_params, headers=headers,
             )
-        if resp.status_code == 401 and attempt == 0:
-            continue  # session expired server-side — retry with a fresh one
+        # 401 is the documented answer; 400 with a session error is what real
+        # instances actually send. Treat both as "get a new session and retry".
+        if attempt == 0 and _is_session_error(resp):
+            _forget_session(config)
+            continue
         return resp
     return resp
 

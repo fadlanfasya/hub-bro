@@ -74,17 +74,49 @@ def mask_config(config: dict) -> dict:
     return _walk(config, lambda v: MASK if v else v)
 
 
+# Sending this as a secret's value deliberately clears it. Anything else that
+# is blank is treated as "no change".
+CLEAR = "__clear__"
+
+
+def _resolve_secret(incoming_value, stored_value):
+    """Decide what a saved secret should end up as.
+
+    An empty value means "leave it alone", never "delete it". Blanking a stored
+    credential by accident is far more likely than wanting to remove one — a
+    half-finished edit, a form that didn't prefill, a field the user opened and
+    closed — and the failure is silent until a dashboard stops loading. Clearing
+    therefore has to be explicit.
+    """
+    if incoming_value == CLEAR:
+        return ""
+    if incoming_value == MASK:
+        return stored_value
+    if incoming_value is None or incoming_value == "":
+        return stored_value
+    return incoming_value
+
+
 def merge_masked(existing: dict, incoming: dict) -> dict:
-    """When saving, keep the stored secret wherever the client sent back the mask.
+    """When saving, work out which secrets to keep and which to replace.
 
     Lets the edit form round-trip without ever handling the real value.
     """
     merged = dict(incoming or {})
+    stored = existing or {}
+
     for key in SECRET_FIELDS:
-        if merged.get(key) == MASK:
-            merged[key] = (existing or {}).get(key, "")
+        # a key that is absent entirely must not drop the stored secret either
+        if key not in merged and key in stored:
+            merged[key] = stored[key]
+            continue
+        if key in merged:
+            merged[key] = _resolve_secret(merged[key], stored.get(key, ""))
+
     for key in SECRET_DICT_FIELDS:
         if isinstance(merged.get(key), dict):
-            old = (existing or {}).get(key) or {}
-            merged[key] = {k: (old.get(k, "") if v == MASK else v) for k, v in merged[key].items()}
+            old = stored.get(key) or {}
+            merged[key] = {
+                k: _resolve_secret(v, old.get(k, "")) for k, v in merged[key].items()
+            }
     return merged
