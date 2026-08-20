@@ -1,0 +1,61 @@
+name: Website
+
+# Publishes website/ to GitHub Pages.
+#
+# Not the "deploy from a branch" setting: that only offers the repository root
+# or /docs, and this repo's docs/ holds operator notes rather than the site. An
+# Actions deploy can publish any folder, so the site lives where it belongs.
+#
+# One-time setup: Settings -> Pages -> Source -> GitHub Actions.
+
+on:
+  push:
+    branches: [master, main]
+    # Only when the site itself changes — a backend commit shouldn't trigger a
+    # deploy that would republish identical files.
+    paths:
+      - 'website/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+# Read the repo, and prove to Pages this workflow is the one publishing.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a running deploy finish rather than cancelling it — a half-applied
+# deployment is worse than a slightly stale one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check the pages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Cheap, and it catches the failure this site is most prone to: a renamed
+      # heading leaving an anchor in the table of contents pointing nowhere.
+      - name: Validate structure and internal links
+        run: python3 website/check.py
+
+  deploy:
+    name: Deploy
+    needs: check
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: website
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
