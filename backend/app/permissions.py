@@ -6,16 +6,28 @@
     export data              x      x       x
     edit dashboards          x      x       -
     share dashboards         x      x       -
-    view data sources        x      x       -
+    list data sources        x      x       -
+    manage data sources      x      -       -
     edit data sources        x      -       -
+    view source health       x      -       -
     manage users             x      -       -
 
 Data sources are hidden from viewers because their configs reveal internal
 hostnames and which systems exist, even with credentials masked. Viewers still
 see the data those sources produce, through dashboards.
 
+Listing and managing are deliberately different capabilities. An editor has to
+pick a source to build a widget, so they can read the list of names; the Data
+sources page shows every connection detail, so it stays with admins. Splitting
+them is what lets the menu be admin-only without disarming every editor.
+
 Only admins edit data sources: a source is shared infrastructure, and a bad
 edit breaks every dashboard using it.
+
+Health is admin-only too. That is a real trade: someone reading a dashboard can
+no longer check whether a source is failing, so a stale number looks like a
+current one. Widgets still show their own fetch errors, which is the part that
+matters at the point of reading.
 """
 from fastapi import Depends, HTTPException, status
 
@@ -46,12 +58,16 @@ MATRIX = {
     "dashboard.export": {ADMIN, EDITOR, VIEWER},
     "dashboard.edit": {ADMIN, EDITOR},
     "dashboard.share": {ADMIN, EDITOR},
+    # Listing sources, which is what the widget builder's picker needs. An
+    # editor cannot build a widget without choosing a source, so this stays
+    # wider than the page below.
     "datasource.view": {ADMIN, EDITOR},
+    # The Data sources page itself. Separate from the list because the page
+    # shows every field of every config — hostnames, ports, database names,
+    # which systems exist — while the picker shows names only.
+    "datasource.manage": {ADMIN},
     "datasource.edit": {ADMIN},
-    # Everyone can see whether a source is reachable. It exposes no config —
-    # just a name and a status — and "is this dashboard stale?" is exactly what
-    # a viewer needs to know before quoting a number.
-    "datasource.health": {ADMIN, EDITOR, VIEWER},
+    "datasource.health": {ADMIN},
     # Anyone can see which alarms exist and what state they are in — that is
     # operational context, and hiding it just means people ask in chat.
     "alert.view": {ADMIN, EDITOR, VIEWER},
@@ -87,6 +103,7 @@ def require(capability: str):
 require_admin = require("user.manage")
 require_dashboard_edit = require("dashboard.edit")
 require_datasource_view = require("datasource.view")
+require_datasource_manage = require("datasource.manage")
 require_datasource_health = require("datasource.health")
 require_datasource_edit = require("datasource.edit")
 require_alert_view = require("alert.view")

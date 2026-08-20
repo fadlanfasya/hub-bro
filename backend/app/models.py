@@ -128,8 +128,18 @@ class AlertRule(Base):
     repeat_minutes = Column(Integer, nullable=False, default=0)
     notify_on_recovery = Column(Boolean, nullable=False, default=True)
 
-    # JSON: {url, format} — url is encrypted, it is a bearer credential
+    # JSON: {url, format, headers, body} — url and header values are encrypted,
+    # they are bearer credentials
     webhook = Column(Text, nullable=False, default="{}")
+
+    # --- scheduled reports ---
+    # "threshold" (default) alerts on change; "report" sends on a clock
+    mode = Column(String, nullable=False, default="threshold")
+    # JSON: {at: "08:00", days: "mon,tue,...", timezone: "Asia/Jakarta"}
+    schedule = Column(Text, nullable=False, default="{}")
+    # message text with {column} placeholders, filled from the query's own row
+    template = Column(Text, nullable=True)
+    last_report_at = Column(DateTime, nullable=True)
 
     # --- evaluation state ---
     # the level we last *notified* about, so we only speak up on change
@@ -160,11 +170,17 @@ class AlertRule(Base):
         return json.loads(self.thresholds or "{}")
 
     @property
+    def schedule_dict(self) -> dict:
+        return json.loads(self.schedule or "{}")
+
+    @property
     def webhook_dict(self) -> dict:
-        """Webhook config with the URL decrypted — for delivery only."""
+        """Webhook config with the URL and header values decrypted."""
         from .secrets_store import decrypt
         raw = json.loads(self.webhook or "{}")
-        return {**raw, "url": decrypt(raw.get("url") or "")}
+        headers = {k: decrypt(v) if isinstance(v, str) else v
+                   for k, v in (raw.get("headers") or {}).items()}
+        return {**raw, "url": decrypt(raw.get("url") or ""), "headers": headers}
 
     @property
     def safe_webhook_dict(self) -> dict:
@@ -175,7 +191,9 @@ class AlertRule(Base):
         """
         from .secrets_store import MASK
         raw = json.loads(self.webhook or "{}")
-        return {**raw, "url": MASK if raw.get("url") else ""}
+        # A gateway token is as good as the URL — mask both, show neither.
+        headers = {k: (MASK if v else "") for k, v in (raw.get("headers") or {}).items()}
+        return {**raw, "url": MASK if raw.get("url") else "", "headers": headers}
 
 
 class AlertNotification(Base):
@@ -206,6 +224,13 @@ class Dashboard(Base):
     # workspace | private — controls who can find it when signed in. Separate
     # from share_token, which is anonymous access for anyone holding the URL.
     visibility = Column(String, nullable=False, default=VISIBILITY_WORKSPACE)
+    # Free-text grouping for the dashboard list. A plain column rather than a
+    # folders table: there is no nesting, no folder to rename or delete, and an
+    # empty folder simply stops existing — which is the behaviour you want when
+    # the whole feature is "put these four together".
+    folder = Column(String, nullable=True)
+    # keeps a dashboard at the top of its group; the cheap version of ordering
+    pinned = Column(Boolean, nullable=False, default=False)
     # random token when the dashboard has a public link; NULL when it has none
     share_token = Column(String, unique=True, index=True, nullable=True)
     # bumped on every save; a client sending a stale number is rejected so two

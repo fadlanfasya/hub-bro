@@ -29,7 +29,9 @@ MAX_SNAPSHOTS = 50
 def _to_out(d: Dashboard) -> DashboardOut:
     return DashboardOut(id=d.id, name=d.name, definition=json.loads(d.definition),
                         share_token=d.share_token, version=d.version or 1,
-                        visibility=d.visibility or "workspace", owner_id=d.owner_id)
+                        visibility=d.visibility or "workspace",
+                        folder=d.folder or None, pinned=bool(d.pinned),
+                        owner_id=d.owner_id)
 
 
 def _snapshot(d: Dashboard, user: User, db: Session, note: str | None = None):
@@ -101,6 +103,18 @@ def list_dashboards(user: User = Depends(get_current_user), db: Session = Depend
     return [_to_out(d) for d in rows]
 
 
+def _clean_folder(value: str | None) -> str | None:
+    """Normalise a folder name. Blank means "no folder", never a folder called ""."""
+    if value is None:
+        return None
+    name = " ".join(str(value).split())      # collapse stray whitespace
+    if not name:
+        return None
+    if len(name) > 60:
+        raise HTTPException(status_code=400, detail="Folder name is too long (max 60)")
+    return name
+
+
 @router.get("/{dashboard_id}", response_model=DashboardOut)
 def get_dashboard(dashboard_id: int, user: User = Depends(get_current_user),
                   db: Session = Depends(get_db)):
@@ -122,7 +136,8 @@ def create_dashboard(payload: DashboardCreate, user: User = Depends(require_dash
     if visibility not in VISIBILITIES:
         raise HTTPException(status_code=400,
                             detail=f"Visibility must be one of {list(VISIBILITIES)}")
-    d = Dashboard(name=payload.name, owner_id=user.id, visibility=visibility)
+    d = Dashboard(name=payload.name, owner_id=user.id, visibility=visibility,
+                  folder=_clean_folder(payload.folder))
     db.add(d)
     db.commit()
     db.refresh(d)
@@ -153,7 +168,15 @@ def update_dashboard(dashboard_id: int, payload: DashboardUpdate,
         d.name = payload.name
     if payload.definition is not None:
         d.definition = json.dumps(payload.definition)
-    d.version = current + 1
+    # Moving or pinning is filing, not editing: it changes nothing anyone is
+    # looking at, so it neither takes a snapshot nor bumps the version. Bumping
+    # would make a colleague's open editor think their copy is stale.
+    if payload.folder is not None:
+        d.folder = _clean_folder(payload.folder)
+    if payload.pinned is not None:
+        d.pinned = bool(payload.pinned)
+    if payload.name is not None or payload.definition is not None:
+        d.version = current + 1
 
     db.commit()
     db.refresh(d)
@@ -209,8 +232,12 @@ def duplicate_dashboard(dashboard_id: int, user: User = Depends(require_dashboar
     # The copy inherits the original's visibility but none of its memberships:
     # you become the owner, and the people it was shared with are not carried
     # over silently. A private original stays private in the copy.
+    # The copy lands in the same folder — you duplicated it to work alongside
+    # the original, not to start a new pile. It is not pinned, though: one pin
+    # is a choice, two identical pins is clutter.
     copy = Dashboard(name=f"{original.name} (copy)", definition=original.definition,
-                     owner_id=user.id, visibility=original.visibility or "workspace")
+                     owner_id=user.id, visibility=original.visibility or "workspace",
+                     folder=original.folder)
     db.add(copy)
     db.commit()
     db.refresh(copy)

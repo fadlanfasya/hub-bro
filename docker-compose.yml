@@ -2,9 +2,16 @@ services:
   hubbro:
     # Published image, so a server only needs this file and .env — no source
     # checkout required:  docker compose pull && docker compose up -d
+    # `latest` is what Watchtower watches. To pin or roll back, put a fixed tag
+    # here (e.g. fadlanfasya/hub-bro:1.2) — Watchtower then follows that tag,
+    # which never moves, so the rollback sticks.
     image: fadlanfasya/hub-bro:latest
     container_name: hub-bro
     restart: unless-stopped
+
+    labels:
+      # opts this container in to Watchtower; nothing else on the host is touched
+      com.centurylinklabs.watchtower.enable: "true"
 
     # Host port 8080 -> app port 8000. Put your own nginx/IIS in front for TLS.
     ports:
@@ -36,6 +43,35 @@ services:
       retries: 3
       start_period: 10s
 
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Watches Docker Hub and updates hub-bro when a new `latest` is published.
+  # Pull-based on purpose: the server never needs an inbound port, so CI can
+  # deploy to a machine on a private network.
+  #
+  # Scoped with `--label-enable`, so it only ever touches containers that opt
+  # in below. Your Grafana and Prometheus are left alone — an update system
+  # that restarts unrelated services is worse than deploying by hand.
+  watchtower:
+    image: containrrr/watchtower
+    container_name: hub-bro-watchtower
+    restart: unless-stopped
+    profiles: ["autodeploy"]        # only starts with --profile autodeploy
+    command: >-
+      --label-enable
+      --cleanup
+      --include-restarting
+      --interval ${WATCHTOWER_INTERVAL:-300}
+    environment:
+      TZ: ${TZ:-Asia/Jakarta}
+      # set WATCHTOWER_NOTIFICATION_URL in .env for a Slack/Teams ping on update
+      WATCHTOWER_NOTIFICATION_URL: ${WATCHTOWER_NOTIFICATION_URL:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     logging:
       driver: json-file
       options:

@@ -15,13 +15,14 @@ from ..models import (
     VISIBILITIES, VISIBILITY_PRIVATE, VISIBILITY_WORKSPACE, DataSource, DataSourceMember, User,
 )
 from ..permissions import (
-    require_datasource_health, require_datasource_view,
+    require_datasource_health, require_datasource_manage, require_datasource_view,
 )
 from ..schemas import DataSourceCreate, DataSourceOut, DataSourceUpdate
 from ..secrets_store import encrypt_config, merge_masked
 
-# Any editor may add a source; only admins may make one workspace-wide.
-require_datasource_create = require_datasource_view
+# Creating a source happens on the Data sources page, which is admin-only, so
+# the endpoint behind it is too. Editors still read the list to build widgets.
+require_datasource_create = require_datasource_manage
 
 router = APIRouter(prefix="/api/datasources", tags=["datasources"])
 
@@ -185,7 +186,7 @@ async def upload_csv(name: str = Form(...), file: UploadFile = File(...),
 
 @router.put("/{ds_id}", response_model=DataSourceOut)
 def update_datasource(ds_id: int, payload: DataSourceUpdate,
-                      user: User = Depends(require_datasource_view),
+                      user: User = Depends(require_datasource_manage),
                       db: Session = Depends(get_db)):
     ds = _get_editable(ds_id, user, db)
     if ds.type == "glpi" and payload.config is not None:
@@ -211,7 +212,7 @@ def update_datasource(ds_id: int, payload: DataSourceUpdate,
 
 
 @router.delete("/{ds_id}")
-def delete_datasource(ds_id: int, user: User = Depends(require_datasource_view),
+def delete_datasource(ds_id: int, user: User = Depends(require_datasource_manage),
                       db: Session = Depends(get_db)):
     ds = _get_editable(ds_id, user, db)
     if ds.type == "csv":
@@ -232,7 +233,7 @@ class SourceMemberIn(BaseModel):
 
 
 @router.get("/{ds_id}/members")
-def list_source_members(ds_id: int, user: User = Depends(require_datasource_view),
+def list_source_members(ds_id: int, user: User = Depends(require_datasource_manage),
                         db: Session = Depends(get_db)):
     _get_usable(ds_id, user, db)
     rows = (db.query(DataSourceMember, User)
@@ -243,7 +244,7 @@ def list_source_members(ds_id: int, user: User = Depends(require_datasource_view
 
 @router.post("/{ds_id}/members")
 def add_source_member(ds_id: int, body: SourceMemberIn,
-                      user: User = Depends(require_datasource_view),
+                      user: User = Depends(require_datasource_manage),
                       db: Session = Depends(get_db)):
     """Let someone build widgets on, and query through, this source.
 
@@ -286,7 +287,7 @@ def add_source_member(ds_id: int, body: SourceMemberIn,
 
 @router.delete("/{ds_id}/members/{user_id}")
 def remove_source_member(ds_id: int, user_id: int,
-                         user: User = Depends(require_datasource_view),
+                         user: User = Depends(require_datasource_manage),
                          db: Session = Depends(get_db)):
     _get_editable(ds_id, user, db)
     member = (db.query(DataSourceMember)

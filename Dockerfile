@@ -33,6 +33,10 @@ COPY backend/requirements.txt ./
 RUN pip install -r requirements.txt
 
 COPY backend/app ./app
+# Diagnostics and maintenance scripts, run with `docker exec hub-bro python
+# /app/tools/<script>.py`. Small, and worth having on the machine that is
+# actually failing rather than only in a source checkout.
+COPY backend/tools ./tools
 COPY --from=frontend /build/dist ./static
 
 # run as a non-root user; /data is a volume so it must be writable by that user

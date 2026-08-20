@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Docs — Hub-Bro</title>
+<meta name="description" content="How to connect a data source, build widgets, share a dashboard, set up alerts and scheduled reports, and deploy Hub-Bro with Docker.">
+<link rel="icon" href="logo.svg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="index.html">
+      <img src="logo.svg" width="24" height="24" alt="">
+      Hub-Bro
+    </a>
+    <nav>
+      <a href="index.html#what">About</a>
+      <a href="index.html#sources">Connectors</a>
+      <a href="docs.html" class="on">Docs</a>
+      <a href="https://hub.docker.com/r/fadlanfasya/hub-bro">Docker Hub</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap docs">
+  <aside class="toc">
+    <strong>Guide</strong>
+    <a href="#start">Getting started</a>
+    <a href="#sources">Data sources</a>
+    <a href="#widgets">Widgets</a>
+    <a href="#tables">Tables</a>
+    <a href="#dashboards">Dashboards</a>
+    <a href="#sharing">Sharing</a>
+    <a href="#alerts">Alerts</a>
+    <a href="#reports">Scheduled reports</a>
+    <a href="#roles">Users and roles</a>
+    <a href="#deploy">Deploying</a>
+    <a href="#trouble">When something breaks</a>
+  </aside>
+
+  <article>
+
+    <h2 id="start">Getting started</h2>
+    <p>
+      The <strong>first person to open the app registers the admin account</strong>,
+      and self-registration then closes permanently. Every account after that is
+      created from the Users page. This matters if you put Hub-Bro somewhere
+      reachable: nobody who finds the URL can sign themselves up.
+    </p>
+    <p>Then the loop is always the same three steps:</p>
+    <ol>
+      <li><strong>Add a data source</strong> — where the numbers come from.</li>
+      <li><strong>Create a dashboard</strong> — pick who can see it while creating it, not after.</li>
+      <li><strong>Add a widget</strong> — choose the source, write the query, pick a shape.</li>
+    </ol>
+    <p>
+      To try it without connecting anything real, add a REST source pointing at
+      <code>https://jsonplaceholder.typicode.com/users</code> and put a table
+      widget on it.
+    </p>
+
+    <h2 id="sources">Data sources</h2>
+    <p>
+      A source holds a connection, not a query. The query lives on the widget,
+      so one source feeds many widgets and one credential is stored once.
+    </p>
+
+    <h3>Prometheus</h3>
+    <p>
+      Base URL only — include the path prefix if it sits behind a proxy, for
+      example <code>https://10.1.6.62/prometheus</code>. Hub-Bro appends
+      <code>/api/v1/query</code> itself. If a proxy in front asks for a login,
+      fill in the username and password fields.
+    </p>
+    <p>
+      Labels come back as their own columns (<code>instance</code>,
+      <code>job</code>, whatever your exporter sets), which is what makes
+      filtering and joining possible.
+    </p>
+
+    <h3>GLPI</h3>
+    <p>
+      The API URL is the <code>apirest.php</code> endpoint, not the web UI:
+      <code>http://glpi.example/apirest.php</code>. You need an App-Token from
+      <em>Setup → General → API</em> and a user token from your own profile.
+      Sessions, pagination and filter pushdown are handled for you.
+    </p>
+
+    <h3>SQL</h3>
+    <p>
+      PostgreSQL, MySQL, MariaDB, SQLite, Doris and StarRocks. Each widget holds
+      one statement, and only <code>SELECT</code> (or <code>WITH … SELECT</code>)
+      is accepted — enforced on the server, not in the form.
+    </p>
+    <div class="note">
+      Doris and StarRocks speak the MySQL protocol on the <strong>query port
+      9030</strong>, not the HTTP port 8030. Connecting to 8030 fails in a way
+      that looks like a credential problem but isn't.
+    </div>
+
+    <h3>REST API</h3>
+    <p>
+      Any JSON endpoint. Choose GET or POST, add headers, and for POST supply a
+      JSON body — which is what Elasticsearch, GraphQL and most DQL-style
+      endpoints need. <strong>The body is not encrypted</strong>, so put
+      credentials in headers.
+    </p>
+    <p>
+      <em>Data path</em> is a dot-path to the array inside the response, e.g.
+      <code>data.items</code>. Leave it blank if the response is already a list.
+    </p>
+
+    <h3>Certificates</h3>
+    <p>
+      There is no "verify SSL" checkbox, because it always got answered wrongly —
+      switched off for an internal host and then left off for a public API.
+      Verification is decided by the address instead: private ranges and
+      hostnames without a dot skip it, anything reachable from the internet does
+      not. Sources saved before this keep whatever they had.
+    </p>
+
+    <h2 id="widgets">Widgets</h2>
+    <p>
+      Seven types: line, bar, pie, stat, gauge, table, and markdown text. Two are
+      worth explaining beyond their names.
+    </p>
+
+    <h3>Stat with supporting numbers</h3>
+    <p>
+      A stat shows one big number and a line of smaller ones underneath, filled
+      from the same result with <code>{column}</code> placeholders. Pair it with
+      <strong>Count into buckets</strong>, which collapses many rows into a single
+      row of named counts:
+    </p>
+    <pre><code>Query    sysCmFailoverStatusId{job="f5ltm"}
+
+Count into buckets
+  Column to count      value
+  Name for the total   total
+  Buckets              active   4 → 4
+                       standby  3 → 3
+
+Value field           total                → 8
+Supporting numbers    Active {active} | Standby {standby}</code></pre>
+    <p>
+      One fetch, so the numbers in one tile can never disagree with each other —
+      which three separate widgets refreshing independently can.
+    </p>
+
+    <h3>Several queries in one table</h3>
+    <p>
+      Prometheus cannot return a table: one query gives one value per series. A
+      table widget on a Prometheus source therefore takes a <em>list</em> of
+      queries, each supplying one column, joined on a label they all carry:
+    </p>
+    <pre><code>Queries
+  sysGlobalHostCpuUsageRatio{job="f5ltm"}     → CPU
+  sysCmFailoverStatusId{job="f5ltm"}          → Failover
+
+Join on    instance</code></pre>
+    <p>
+      The join is an outer join: a device that answers one query but not another
+      keeps its row with a blank. An inner join would hide exactly the device you
+      need to look at.
+    </p>
+
+    <h2 id="tables">Tables</h2>
+    <p>Four options that change how much a table tells you at a glance:</p>
+    <table>
+      <tr><th>Option</th><th>What it does</th></tr>
+      <tr><td>Colour rules</td><td>Colour a cell — or the whole row — by value. First matching rule wins, so put the strictest first.</td></tr>
+      <tr><td>Bar columns</td><td>Draws a fill behind the number. Columns that read as percentages snap to 0–100; anything else scales to the busiest row.</td></tr>
+      <tr><td>Number format</td><td>Decimals and a unit, per column. Only changes what is shown — sorting and colour rules still use the full value.</td></tr>
+      <tr><td>Link columns</td><td>Turns a column into links, with <code>{column}</code> filled from the row.</td></tr>
+    </table>
+    <div class="note">
+      Set <strong>Max</strong> on a bar column when every value huddles at the
+      bottom of its scale. A session column reading 0.0–0.6% on a 0–100 bar is a
+      row of invisible hairlines; setting Max to 2 makes the differences readable.
+    </div>
+
+    <h3>Landing on one row</h3>
+    <p>
+      A link can carry a search: append <code>?q={ticket_id}</code> and the page
+      it opens starts with that text in its search box, narrowed to that row. The
+      box stays editable, so nobody is trapped there. The filtering happens in the
+      browser, which is why a public link can never steer the query the server runs.
+    </p>
+
+    <h2 id="dashboards">Dashboards</h2>
+    <p>
+      Drag widgets anywhere on a 12-column grid; the layout saves itself. Widgets
+      can be locked so a stray drag on a wall display doesn't rearrange the board.
+    </p>
+    <ul>
+      <li><strong>Folders and pins</strong> — group dashboards, and pin the ones you open daily to the top of their group.</li>
+      <li><strong>Cross-filtering</strong> — click a slice, bar or row to filter every widget; click again to release.</li>
+      <li><strong>Time range</strong> — a picker from 15 minutes to 30 days. Widgets follow it, or pin their own window.</li>
+      <li><strong>History</strong> — every distinct layout is kept and restorable.</li>
+      <li><strong>Drill-down</strong> — a widget can link to another dashboard, and the back button returns to where you came from rather than the list.</li>
+    </ul>
+
+    <h2 id="sharing">Sharing</h2>
+    <p>
+      A dashboard is <strong>workspace</strong> or <strong>private</strong>,
+      chosen when you create it so a private one is never briefly visible to
+      everyone. Private ones can be shared with named people.
+    </p>
+    <p>
+      A <strong>share link</strong> is different: an unguessable URL that needs no
+      account. Add <code>?kiosk=1&amp;refresh=60</code> for a wall display —
+      no chrome, refreshing every 60 seconds.
+    </p>
+    <div class="note">
+      Being invited to a dashboard grants the <em>numbers on it</em>, not access
+      to the source behind them. Someone reading your GLPI dashboard cannot query
+      GLPI.
+    </div>
+
+    <h2 id="alerts">Alerts</h2>
+    <p>An alert rule is a query, a threshold, and a webhook. Three behaviours make it liveable:</p>
+    <ul>
+      <li><strong>It speaks on change.</strong> A metric sitting at critical for six hours is one message, not seventy-two.</li>
+      <li><strong>Fire after N checks</strong> is the flap guard: with 2, a single bad reading stays quiet.</li>
+      <li><strong>Recovery is always reported.</strong> A channel that only carries bad news gets muted.</li>
+    </ul>
+    <p>
+      Destinations: Slack (also Mattermost and Rocket.Chat), Microsoft Teams,
+      generic JSON, or a custom body. Use <strong>Test</strong> to prove it works
+      before you need it.
+    </p>
+
+    <h2 id="reports">Scheduled reports</h2>
+    <p>
+      A report is the opposite promise from an alert: it arrives at its time
+      whether the news is good or bad. That is the point — silence from an alert
+      is ambiguous, but a report that stops arriving is itself a signal.
+    </p>
+    <pre><code>Mode        Send a report on a schedule
+Send at     08:00
+Days        mon,tue,wed,thu,fri      (blank = every day)
+Timezone    Asia/Jakarta
+
+Message     Ticket report
+            Breach {breach} | Warning {warning} | On track {on_track}</code></pre>
+    <p>
+      The placeholders come from the query's own columns, so this pairs with
+      Count into buckets exactly as a stat tile does. A missed window is not made
+      up: if the server was down at 08:00 and returns at 11:00 the report still
+      goes out, but yesterday's is never replayed today.
+    </p>
+
+    <h3>Sending to WhatsApp</h3>
+    <p>
+      WhatsApp has no standard incoming webhook, and every gateway names its
+      fields differently. Rather than baking in a vendor, choose
+      <strong>Custom body</strong> and write the JSON yourself, with
+      <code>{message}</code> where the text goes:
+    </p>
+    <pre><code>URL            http://waha:3000/api/sendText
+Token header   X-Api-Key
+Token          your gateway key
+
+Body           {"session": "default",
+                "chatId": "6281234567890@c.us",
+                "text": "{message}",
+                "linkPreview": false}</code></pre>
+    <p>
+      The token travels as a header, never in the URL, so it does not land in an
+      access log on the way. Both are stored encrypted and masked afterwards.
+    </p>
+    <div class="note">
+      <strong>Two things to know.</strong> Meta's official Cloud API cannot post
+      to groups and requires a pre-approved template for business-initiated
+      messages — a daily ops report fits it badly. Unofficial gateways run a
+      WhatsApp Web session and can get the number banned, so use a dedicated
+      number rather than a personal one.
+    </div>
+
+    <h2 id="roles">Users and roles</h2>
+    <table>
+      <tr><th>Capability</th><th>Admin</th><th>Editor</th><th>Viewer</th></tr>
+      <tr><td>View dashboards, export CSV/PNG</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><td>Create and edit dashboards, share links</td><td>✓</td><td>✓</td><td>—</td></tr>
+      <tr><td>Choose a source when building a widget</td><td>✓</td><td>✓</td><td>—</td></tr>
+      <tr><td>Data sources page, add and edit sources</td><td>✓</td><td>—</td><td>—</td></tr>
+      <tr><td>Source health page</td><td>✓</td><td>—</td><td>—</td></tr>
+      <tr><td>Manage users</td><td>✓</td><td>—</td><td>—</td></tr>
+    </table>
+    <p>
+      Viewers cannot see source configs, because those expose internal hostnames
+      and which systems exist even with credentials masked. They also cannot call
+      the ad-hoc query endpoint — otherwise "read-only" would still allow
+      arbitrary SQL against a SQL source.
+    </p>
+    <p>
+      You cannot demote, deactivate or delete the last remaining admin, or
+      yourself. Deactivating someone takes effect immediately, even if they hold
+      a valid token.
+    </p>
+
+    <h2 id="deploy">Deploying</h2>
+    <p>
+      The image is published as <code>fadlanfasya/hub-bro</code>, so a server
+      needs only a <code>docker-compose.yml</code> and a <code>.env</code> — no
+      source checkout.
+    </p>
+    <pre><code>cp .env.example .env
+
+# generate a key and put it in .env as SECRET_KEY
+docker run --rm python:3.12-slim \
+  python -c "import secrets; print(secrets.token_urlsafe(48))"
+
+docker compose pull
+docker compose up -d</code></pre>
+    <p>
+      The app is then on <code>http://&lt;server&gt;:8080</code> — UI and API on
+      one port, no separate web server needed. For TLS, put nginx in front with
+      the bundled <code>docker-compose.nginx.yml</code>.
+    </p>
+    <div class="note">
+      <strong><code>SECRET_KEY</code> must stay the same forever.</strong> It
+      decrypts your stored source credentials. Changing it does not delete them —
+      it makes them unreadable, which looks like every source failing at once.
+      Back it up somewhere other than the server.
+    </div>
+    <p>
+      Upgrading is <code>docker compose pull &amp;&amp; docker compose up -d</code>.
+      Dashboards, users and credentials live in the <code>hubbro-data</code>
+      volume and are untouched by an image update. New columns are added
+      automatically on start.
+    </p>
+
+    <h2 id="trouble">When something breaks</h2>
+    <table>
+      <tr><th>Symptom</th><th>Usually</th></tr>
+      <tr><td>Every source fails right after an upgrade</td><td><code>SECRET_KEY</code> changed. Restore the old one; the data is fine.</td></tr>
+      <tr><td>GLPI: <code>ERROR_SESSION_TOKEN_MISSING</code></td><td>The API URL has a path after <code>apirest.php</code>, or the tokens are empty.</td></tr>
+      <tr><td>A stat shows a huge number like 1755200000</td><td>The value field picked up a timestamp. Set it to <code>value</code> explicitly.</td></tr>
+      <tr><td>A widget shows a number that never changes</td><td>Response caching. Press Refresh data, which clears the cache for that dashboard's sources.</td></tr>
+      <tr><td>A webhook to a container fails</td><td><code>localhost</code> inside a container means the container. Use the service name or the host address.</td></tr>
+      <tr><td>A report stopped arriving</td><td>Check the rule's history first — delivery failures are recorded there, not only in the server log.</td></tr>
+    </table>
+
+  </article>
+</div>
+
+<footer class="site">
+  <div class="wrap">
+    <img src="logo.svg" width="20" height="20" alt="">
+    <span>Hub-Bro</span>
+    <span class="spacer"></span>
+    <a href="index.html">Home</a>
+    <a href="#deploy">Deploy</a>
+    <a href="https://hub.docker.com/r/fadlanfasya/hub-bro">Docker Hub</a>
+  </div>
+</footer>
+
+</body>
+</html>

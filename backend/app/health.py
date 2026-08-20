@@ -21,6 +21,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from .config import settings
+from .connectors.tls import verify_for
 from .models import DataSource, DataSourceCheck
 
 log = logging.getLogger("uvicorn.error")
@@ -48,18 +49,22 @@ async def _probe_rest(config: dict) -> None:
     if not url:
         raise ValueError("No URL configured")
     async with httpx.AsyncClient(timeout=min(settings.FETCH_TIMEOUT_SECONDS, 15),
-                                 verify=config.get("verify_ssl", True),
+                                 verify=verify_for(url, config),
                                  follow_redirects=True) as client:
         resp = await client.get(url, headers=config.get("headers") or {})
         resp.raise_for_status()
 
 
 async def _probe_prometheus(config: dict) -> None:
+    from .connectors.prometheus import auth_for, raise_for_auth
     base = (config.get("base_url") or "").rstrip("/")
     if not base:
         raise ValueError("No base_url configured")
-    async with httpx.AsyncClient(timeout=min(settings.FETCH_TIMEOUT_SECONDS, 15)) as client:
+    async with httpx.AsyncClient(timeout=min(settings.FETCH_TIMEOUT_SECONDS, 15),
+                                 verify=verify_for(base, config),
+                                 auth=auth_for(config)) as client:
         resp = await client.get(f"{base}/api/v1/query", params={"query": "1"})
+        raise_for_auth(resp, config)
         resp.raise_for_status()
         if resp.json().get("status") != "success":
             raise ValueError("Prometheus rejected the probe query")

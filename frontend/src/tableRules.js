@@ -6,6 +6,7 @@
  * tone is one of good | bad | warn | muted, mapped to CSS classes so both
  * themes stay consistent.
  */
+import { formatStatValue } from './format'
 
 /**
  * Available cell tones. Each has a matching `td.tone-X` rule in styles.css,
@@ -117,6 +118,79 @@ export function distinctValues(rows, column, limit = 200) {
 /** How many column filters are currently doing something. */
 export function activeFilterCount(columnFilters = {}) {
   return Object.values(columnFilters).filter((v) => v?.length).length
+}
+
+/**
+ * In-cell bar gauges.
+ *
+ * A number in a table tells you the value; a bar behind it tells you the value
+ * relative to its neighbours, which is what you actually scan a device list
+ * for. The scale matters more than it looks: a CPU column belongs on a fixed
+ * 0–100 so 4% stays visibly small, while a "Virtual Servers" column has no
+ * natural ceiling and is only meaningful against the busiest row.
+ */
+
+/** Columns configured to show a bar, as a Set. */
+export function barColumnSet(spec) {
+  if (Array.isArray(spec)) return new Set(spec.filter(Boolean).map(String))
+  if (typeof spec === 'string') {
+    return new Set(spec.split(',').map((s) => s.trim()).filter(Boolean))
+  }
+  return new Set()
+}
+
+/**
+ * Upper bound for a column's bars.
+ *
+ * An explicit max wins. Otherwise the largest value in the column is used, so
+ * the busiest row fills the bar — except when every value looks like a
+ * percentage, where 100 is the honest ceiling. Without that exception a rack
+ * of idle devices would each show a full bar at 5% CPU.
+ */
+export function barMaxFor(rows, column, explicit) {
+  if (isNumeric(explicit)) return Number(explicit)
+
+  const values = rows.map((r) => r[column]).filter(isNumeric).map(Number)
+  if (!values.length) return 0
+
+  const max = Math.max(...values)
+  const min = Math.min(...values)
+  if (min >= 0 && max <= 100) return 100
+  return max
+}
+
+/** How full a bar should be, 0–1. Out-of-range values clamp instead of overflowing. */
+export function barFraction(value, max) {
+  if (!isNumeric(value) || !isNumeric(max) || Number(max) <= 0) return null
+  const fraction = Number(value) / Number(max)
+  if (!Number.isFinite(fraction)) return null
+  return Math.min(1, Math.max(0, fraction))
+}
+
+/**
+ * Per-column number formatting.
+ *
+ * A PromQL division answers with everything it has — 2.385722420266237 — which
+ * is true and unreadable. Rounding in the query would work, but then the raw
+ * number is gone from the data too; rounding here keeps the value intact and
+ * only changes what the cell shows.
+ *
+ * column_format: [{ column: "Memory", decimals: 1, unit: "%" }]
+ */
+export function formatSpecFor(specs, column) {
+  if (!specs?.length) return null
+  return specs.find((s) => s?.column === column) || null
+}
+
+export function formatCell(value, spec) {
+  if (!spec || typeof value !== 'number' || !Number.isFinite(value)) {
+    return value === null || value === undefined ? '' : String(value)
+  }
+  return formatStatValue(value, {
+    decimals: spec.decimals,
+    suffix: spec.unit || '',
+    thousands: spec.thousands !== false,
+  })
 }
 
 function matches(cellValue, rule) {

@@ -10,8 +10,12 @@ const CAPABILITY_LABELS = {
   'dashboard.export': 'Export data',
   'dashboard.edit': 'Create and edit dashboards',
   'dashboard.share': 'Create share links',
-  'datasource.view': 'View data sources',
+  'datasource.view': 'Choose a data source when building a widget',
+  'datasource.manage': 'Open the Data sources page',
   'datasource.edit': 'Add and edit data sources',
+  'datasource.health': 'See whether sources are reachable',
+  'alert.view': 'See alert rules and their state',
+  'alert.edit': 'Create and edit alert rules',
   'user.manage': 'Manage users',
 }
 

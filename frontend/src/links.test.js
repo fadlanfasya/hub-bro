@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  buildLinkUrl, isInternalLink, isSafeUrl, linkProps, templateColumns,
+  backTarget, buildLinkUrl, isDashboardLink, isInternalLink, isSafeUrl, linkProps,
+  searchFromUrl, templateColumns, withOrigin,
 } from './links'
 
 describe('isSafeUrl', () => {
@@ -124,5 +125,94 @@ describe('linkProps', () => {
     // without noopener the opened page can navigate this one
     expect(props.rel).toContain('noopener')
     expect(props.rel).toContain('noreferrer')
+  })
+})
+
+describe('remembering where a drill-down came from', () => {
+  describe('withOrigin', () => {
+    it('tags a dashboard link with the dashboard you left', () => {
+      expect(withOrigin('/dashboards/6', 3)).toBe('/dashboards/6?from=3')
+    })
+
+    it('appends to a link that already has a query', () => {
+      expect(withOrigin('/dashboards/6?tab=ltm', 3)).toBe('/dashboards/6?tab=ltm&from=3')
+    })
+
+    it('keeps a hash at the end where it belongs', () => {
+      expect(withOrigin('/dashboards/6#f5', 3)).toBe('/dashboards/6?from=3#f5')
+    })
+
+    it('leaves an origin the author set alone', () => {
+      expect(withOrigin('/dashboards/6?from=9', 3)).toBe('/dashboards/6?from=9')
+    })
+
+    it('never touches an external URL', () => {
+      // adding parameters to someone else's URL can change what it does
+      expect(withOrigin('https://helpdesk.internal/ticket/12', 3))
+        .toBe('https://helpdesk.internal/ticket/12')
+    })
+
+    it('leaves other internal paths alone', () => {
+      expect(withOrigin('/health', 3)).toBe('/health')
+    })
+
+    it('does nothing without an origin', () => {
+      expect(withOrigin('/dashboards/6', null)).toBe('/dashboards/6')
+      expect(withOrigin('/dashboards/6', undefined)).toBe('/dashboards/6')
+      expect(withOrigin('/dashboards/6', '')).toBe('/dashboards/6')
+    })
+
+    it('passes a null link through untouched', () => {
+      expect(withOrigin(null, 3)).toBeNull()
+    })
+  })
+
+  describe('backTarget', () => {
+    it('goes back to the dashboard named in the URL', () => {
+      expect(backTarget('?from=3')).toEqual({ to: '/dashboards/3', fromId: 3 })
+    })
+
+    it('falls back to the list when there is no origin', () => {
+      expect(backTarget('')).toEqual({ to: '/', fromId: null })
+      expect(backTarget('?tab=ltm')).toEqual({ to: '/', fromId: null })
+    })
+
+    it('ignores anything that is not a plain id', () => {
+      // a crafted link must not steer the back button somewhere else
+      expect(backTarget('?from=../../health')).toEqual({ to: '/', fromId: null })
+      expect(backTarget('?from=https://evil.example')).toEqual({ to: '/', fromId: null })
+      expect(backTarget('?from=')).toEqual({ to: '/', fromId: null })
+    })
+  })
+
+  it('survives the round trip a drill-down actually makes', () => {
+    const link = withOrigin('/dashboards/6', 3)
+    const search = link.slice(link.indexOf('?'))
+    expect(backTarget(search).to).toBe('/dashboards/3')
+  })
+})
+
+describe('searchFromUrl', () => {
+  it('reads the search text a drill-down link carried', () => {
+    expect(searchFromUrl('?q=349748')).toBe('349748')
+  })
+
+  it('works alongside the other parameters a kiosk link uses', () => {
+    expect(searchFromUrl('?kiosk=1&refresh=60&q=349748')).toBe('349748')
+  })
+
+  it('decodes a value with spaces', () => {
+    expect(searchFromUrl('?q=Perubahan%20Data')).toBe('Perubahan Data')
+  })
+
+  it('is empty when there is nothing to narrow to', () => {
+    expect(searchFromUrl('')).toBe('')
+    expect(searchFromUrl('?kiosk=1')).toBe('')
+    expect(searchFromUrl(undefined)).toBe('')
+  })
+
+  it('treats a blank value as no search rather than a search for nothing', () => {
+    expect(searchFromUrl('?q=')).toBe('')
+    expect(searchFromUrl('?q=%20%20')).toBe('')
   })
 })

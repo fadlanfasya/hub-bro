@@ -161,12 +161,12 @@ def visible_datasources(db: Session, user: User):
 
 
 def can_create_datasource(user: User) -> bool:
-    """Editors may add their own sources; only admins may add shared ones.
+    """Adding a source is done from the Data sources page, so it follows it.
 
-    Enforced together with `visibility` in the router — an editor creating a
-    workspace-wide source would be handing their credentials to everyone.
+    That page is admin-only, and an endpoint that stays open when the only
+    screen leading to it is closed is a gap waiting to be found.
     """
-    return can(user, "datasource.view")
+    return can(user, "datasource.manage")
 
 
 def can_create_workspace_datasource(user: User) -> bool:

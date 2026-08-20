@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import {
   RefreshCw, Plus, GripVertical, Pencil, X, LayoutGrid, ChevronLeft, Check,
   Loader2, Copy, Share2, Lock, Unlock, Eye, Palette, Filter, History, AlertCircle,
@@ -22,6 +22,7 @@ import WidgetConfigModal from '../components/WidgetConfigModal'
 import {
   layoutsEqual, minSizeFor, nextSlot, toGridItems, toStoredLayout, widgetClass,
 } from '../layout'
+import { backTarget, searchFromUrl } from '../links'
 import { downloadCsv, downloadPng } from '../export'
 import { DEFAULT_RANGE, RANGES } from '../timeRange'
 import { useAuth } from '../useAuth'
@@ -29,6 +30,9 @@ import { useAuth } from '../useAuth'
 export default function DashboardEditor() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
+  const back = useMemo(() => backTarget(location.search), [location.search])
+  const initialSearch = useMemo(() => searchFromUrl(location.search), [location.search])
   const { can } = useAuth()
   const canEdit = can('dashboard.edit')
   const [theme] = useTheme()   // light or dark, so widget accents pick the right variant
@@ -43,6 +47,7 @@ export default function DashboardEditor() {
   const [historyOpen, setHistoryOpen] = useState(false)
   const [conflict, setConflict] = useState(null)
   const [allDashboards, setAllDashboards] = useState([])
+  const [cameFrom, setCameFrom] = useState('')
   // transient cross-filter from clicking a slice/bar/row — never persisted
   const [selection, setSelection] = useState(null)
 
@@ -54,6 +59,19 @@ export default function DashboardEditor() {
   const widgetData = useRef({})
   const gridRef = useRef(null)
   const versionRef = useRef(1)
+
+  // Where the back button goes. Fetching the origin's name is a separate,
+  // failable call: if that dashboard was deleted or is no longer visible to
+  // this person, the button quietly falls back to the list rather than
+  // offering a door that opens onto a 404.
+  useEffect(() => {
+    if (!back.fromId) { setCameFrom(''); return }
+    let cancelled = false
+    dashboards.get(back.fromId)
+      .then((res) => { if (!cancelled) setCameFrom(res.data.name) })
+      .catch(() => { if (!cancelled) setCameFrom('') })
+    return () => { cancelled = true }
+  }, [back.fromId])
 
   useEffect(() => {
     dashboards.get(id).then((res) => {
@@ -257,7 +275,8 @@ export default function DashboardEditor() {
           title={canEdit ? (item.locked ? 'Locked — unlock to move' : 'Drag to move') : undefined}>
           {canEdit && <span className="grip"><GripVertical size={14} /></span>}
           <span className="title">{w.title}</span>
-          <WidgetLink url={w.options?.link} label={w.options?.link_label} />
+          <WidgetLink url={w.options?.link} label={w.options?.link_label}
+            fromDashboardId={dashboard?.id} />
           <DataBadge meta={statuses[w.id]?.meta} stale={statuses[w.id]?.stale} />
           <span className="actions widget-actions">
             <ExportMenu compact actions={widgetExports(w)} label="Export widget" />
@@ -290,6 +309,7 @@ export default function DashboardEditor() {
           <WidgetRenderer widget={w} refreshKey={refreshKey}
             dashboardRange={timeRange} onData={captureData}
             dashboardId={id} readOnly={!canEdit}
+            initialSearch={initialSearch}
             selection={selection} onSelect={handleSelect} />
         </div>
       </div>
@@ -299,10 +319,13 @@ export default function DashboardEditor() {
   return (
     <>
       <div className="editor-bar">
-        <button className="ghost icon" aria-label="Back to dashboards" title="Back to dashboards"
-          onClick={() => navigate('/')}>
+        <button className="ghost icon"
+          aria-label={back.fromId ? `Back to ${cameFrom || 'the previous dashboard'}` : 'Back to dashboards'}
+          title={back.fromId ? `Back to ${cameFrom || 'the previous dashboard'}` : 'Back to dashboards'}
+          onClick={() => navigate(back.to)}>
           <ChevronLeft size={16} />
         </button>
+        {back.fromId && cameFrom && <span className="crumb">{cameFrom}</span>}
         <h1>
           <EditableTitle value={dashboard.name} disabled={!canEdit} onSave={renameDashboard} />
         </h1>

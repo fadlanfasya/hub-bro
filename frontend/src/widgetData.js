@@ -18,15 +18,34 @@ export function buildOptions(widget, dashboardRange, crossFilters) {
 
   if (o.data_path) opts.data_path = o.data_path
   if (o.rename) opts.rename = o.rename
-  if (o.query) opts.query = o.query
+
+  // A table built from several PromQL queries sends the whole set plus the key
+  // they join on. Everything else about the join — bar columns, colour rules —
+  // is drawn in the browser and never leaves it.
+  const queries = (o.queries || []).filter((q) => q?.query)
+  if (queries.length && o.join?.on) {
+    opts.queries = queries
+    opts.join = o.join
+  } else if (o.query) {
+    opts.query = o.query
+  }
+
+  // series_field deliberately stays out: it only renames a legend in the
+  // browser, and sending it would split the cache for identical data
   if (o.itemtype) opts.itemtype = o.itemtype
   if (o.max_rows) opts.max_rows = o.max_rows
+  // GLPI: "search" returns the item type's default display columns, "list"
+  // returns every stored field. Only send it when it differs from the default.
+  if (o.mode === 'list') opts.mode = 'list'
 
   // transforms, applied server-side after the fetch
   if (o.unpivot?.columns?.length) opts.unpivot = o.unpivot
   // date_diff runs before filters server-side, so a filter can reference the
   // column it produces
   if (o.date_diff?.length) opts.date_diff = o.date_diff.filter((d) => d?.column)
+  // count_by replaces every row with one summary row, so a single stat widget
+  // can show several differently-bucketed counts at once
+  if (o.count_by?.column && o.count_by?.buckets?.length) opts.count_by = o.count_by
   if (o.filters?.length) opts.filters = o.filters
   if (o.group_by) {
     opts.group_by = o.group_by
@@ -46,23 +65,34 @@ export function buildOptions(widget, dashboardRange, crossFilters) {
  * Pivot Prometheus-style {time, series, value} rows into one row per timestamp
  * with a column per series, so multi-series charts line up on a shared X axis.
  */
-export function pivotSeries(rows) {
+export function pivotSeries(rows, key = 'series') {
   if (!rows?.length) return { rows: [], seriesNames: [] }
-  if (!rows.some((r) => 'series' in r)) return { rows, seriesNames: [] }
+  if (!rows.some((r) => key in r)) return { rows, seriesNames: [] }
 
-  const seriesNames = [...new Set(rows.map((r) => r.series))]
+  const nameOf = (r) => String(r[key] ?? '')
+  const seriesNames = [...new Set(rows.map(nameOf))]
   const byTime = new Map()
   for (const r of rows) {
     if (!byTime.has(r.time)) byTime.set(r.time, { time: r.time })
-    byTime.get(r.time)[r.series] = r.value
+    byTime.get(r.time)[nameOf(r)] = r.value
   }
   return { rows: [...byTime.values()], seriesNames }
 }
 
+/**
+ * Columns that are numbers but never the number you want on a tile.
+ * A Prometheus result leads with `time`, a unix timestamp — picking it as the
+ * value field turned every stat widget into a clock.
+ */
+const NOT_A_VALUE = new Set(['time', 'timestamp', 'series'])
+
 /** Reduce rows to the single number a stat widget shows. */
 export function computeStat(rows, columns, opts = {}) {
+  const numeric = (c) => typeof rows[0]?.[c] === 'number'
   const field = opts.value_field
-    || columns.find((c) => typeof rows[0]?.[c] === 'number')
+    || columns.find((c) => !NOT_A_VALUE.has(c) && numeric(c))
+    // a table whose only number really is called "time" still gets an answer
+    || columns.find(numeric)
     || columns[0]
 
   if (!rows.length) return { field, value: '—' }
@@ -123,10 +153,19 @@ export function visibleColumns(columns, selected) {
 
 /** Decide what to plot: which key is the X axis and which keys are series. */
 export function resolveChartFields(columns, rows, opts = {}) {
-  const isPrometheus = columns.join(',') === 'time,series,value'
+  // Checked by presence, not by an exact column list: a Prometheus result also
+  // carries a column per label now, so matching "time,series,value" exactly
+  // silently stopped recognising it and every chart fell through to the
+  // single-series branch.
+  const isPrometheus = ['time', 'series', 'value'].every((c) => columns.includes(c))
 
   if (isPrometheus) {
-    const pivoted = pivotSeries(rows)
+    // one label usually makes a better legend than the whole label set —
+    // "STL-L02-R10-ELTM01" reads better than "instance=…,job=f5ltm"
+    const key = opts.series_field && columns.includes(opts.series_field)
+      ? opts.series_field
+      : 'series'
+    const pivoted = pivotSeries(rows, key)
     return {
       xKey: 'time',
       yKeys: pivoted.seriesNames,

@@ -27,7 +27,7 @@ from app.auth import hash_password  # noqa: E402
 from app.database import SessionLocal, engine  # noqa: E402
 from app.database import Base  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import User  # noqa: E402
+from app.models import DataSource, User  # noqa: E402
 
 Base.metadata.create_all(engine)
 client = TestClient(app)
@@ -70,10 +70,24 @@ ADMIN, ALICE, BOB, VERA = (token("admin@x.com"), token("alice@x.com"),
                            token("bob@x.com"), token("vera@x.com"))
 
 print("setting the scene")
-ds = client.post("/api/datasources", headers=ALICE, json={
+# Managing sources is admin-only, so an editor is refused before anything else
+check("an editor cannot create a source",
+      client.post("/api/datasources", headers=ALICE, json={
+          "name": "Nope", "type": "rest", "config": {}, "visibility": "private"}).status_code,
+      403)
+
+ds = client.post("/api/datasources", headers=ADMIN, json={
     "name": "Alice private DB", "type": "rest",
     "config": {"url": "http://payroll.internal/api"}, "visibility": "private"}).json()
-check("an editor can create a private source", "id" in ds, True)
+check("an admin can create a private source", "id" in ds, True)
+
+# hand it to Alice so the ownership rules below are still being exercised
+_s = SessionLocal()
+_owner = _s.query(User).filter(User.email == "alice@x.com").first()
+_ds_row = _s.query(DataSource).filter(DataSource.id == ds["id"]).first()
+_ds_row.owner_id = _owner.id
+_s.commit()
+_s.close()
 
 pub = client.post("/api/datasources", headers=ADMIN, json={
     "name": "Shared Doris", "type": "rest", "config": {"url": "http://doris/api"},
@@ -130,11 +144,21 @@ check("it is absent from Bob's source list",
 check("an ad-hoc query through it is refused",
       client.post("/api/data/fetch", headers=BOB,
                   json={"datasource_id": ds["id"], "options": {}}).status_code, 404)
+# Editing and deleting are admin-only now, so a non-admin is stopped by the
+# capability before any lookup happens. That answers 403 rather than 404 — and
+# it leaks nothing, because the answer is identical for an id that exists and
+# one that does not. The check below is what makes that claim true.
 check("editing it is refused",
       client.put(f"/api/datasources/{ds['id']}", headers=BOB,
-                 json={"name": "mine now"}).status_code, 404)
+                 json={"name": "mine now"}).status_code, 403)
 check("deleting it is refused",
-      client.delete(f"/api/datasources/{ds['id']}", headers=BOB).status_code, 404)
+      client.delete(f"/api/datasources/{ds['id']}", headers=BOB).status_code, 403)
+check("and a source that does not exist answers the same way",
+      client.delete("/api/datasources/999999", headers=BOB).status_code, 403)
+check("so the refusal reveals nothing about what exists",
+      client.put(f"/api/datasources/{ds['id']}", headers=BOB, json={"name": "x"}).status_code
+      == client.put("/api/datasources/999999", headers=BOB, json={"name": "x"}).status_code,
+      True)
 check("building an alert rule on it is refused",
       client.post("/api/alerts", headers=BOB, json={
           "name": "leak", "datasource_id": ds["id"],

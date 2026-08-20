@@ -1,15 +1,15 @@
 import { Link } from 'react-router-dom'
 import { ArrowUpRight } from 'lucide-react'
-import { isSafeUrl, linkProps } from '../links'
+import { isSafeUrl, linkProps, withOrigin } from '../links'
 
 /**
  * Optional "go deeper" link in a widget header — to another dashboard or an
  * external system. Sits outside the drag handle's cancel zone so clicking it
  * navigates rather than starting a drag.
  */
-export default function WidgetLink({ url, label }) {
+export default function WidgetLink({ url, label, fromDashboardId }) {
   if (!isSafeUrl(url)) return null
-  const props = linkProps(url)
+  const props = linkProps(withOrigin(url, fromDashboardId))
   const text = label || (props.internal ? 'Open' : 'View')
 
   const body = <>{text}<ArrowUpRight size={11} /></>

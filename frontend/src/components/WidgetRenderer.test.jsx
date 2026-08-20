@@ -386,3 +386,112 @@ describe('stat sparkline', () => {
     expect(container.querySelector('.stat-detail')).not.toBeNull()
   })
 })
+
+describe('table bar gauges', () => {
+  const withBars = (options) => ({ ...base, type: 'table', options })
+  const widths = (container) =>
+    [...container.querySelectorAll('.cell-bar-fill')].map((el) => el.style.width)
+
+  it('draws a fill scaled to the busiest row', async () => {
+    const { container } = await mount(withBars({ bar_columns: ['total'] }))
+    // 23159 is the max, 3217 is 13.9% of it
+    expect(widths(container)).toEqual(['100%', '13.89%'])
+  })
+
+  it('leaves other columns as plain cells', async () => {
+    const { container } = await mount(withBars({ bar_columns: ['total'] }))
+    expect(container.querySelectorAll('.cell-bar').length).toBe(2)   // one per row
+    expect(container.querySelectorAll('tbody td').length).toBe(4)
+  })
+
+  it('does not draw bars on a text column', async () => {
+    const { container } = await mount(withBars({ bar_columns: ['status'] }))
+    expect(container.querySelector('.cell-bar-fill')).toBeNull()
+  })
+
+  it('honours an explicit maximum', async () => {
+    const { container } = await mount(
+      withBars({ bar_columns: ['total'], bar_max: 50000 }))
+    expect(widths(container)).toEqual(['46.32%', '6.43%'])
+  })
+
+  it('clamps a value above the configured maximum', async () => {
+    const { container } = await mount(
+      withBars({ bar_columns: ['total'], bar_max: 10000 }))
+    expect(widths(container)[0]).toBe('100%')
+  })
+
+  it('takes its colour from the matching colour rule', async () => {
+    const { container } = await mount(withBars({
+      bar_columns: ['total'],
+      color_rules: [{ column: 'total', op: 'gt', value: 10000, tone: 'bad' }],
+    }))
+    const fills = [...container.querySelectorAll('.cell-bar-fill')]
+    expect(fills[0].className).toContain('tone-bad')
+    expect(fills[1].className).not.toContain('tone-bad')
+  })
+
+  it('still shows the number, not just the bar', async () => {
+    const { container } = await mount(withBars({ bar_columns: ['total'] }))
+    expect(container.querySelector('.cell-bar-text').textContent).toBe('23159')
+  })
+
+  it('renders nothing extra when no bar columns are set', async () => {
+    const { container } = await mount(withBars({}))
+    expect(container.querySelector('.cell-bar')).toBeNull()
+  })
+
+  it('accepts a comma separated string as well as an array', async () => {
+    const { container } = await mount(withBars({ bar_columns: 'total' }))
+    expect(widths(container)).toEqual(['100%', '13.89%'])
+  })
+})
+
+describe('a table opened from a drill-down link', () => {
+  const tickets = {
+    columns: ['ticket_id', 'status'],
+    rows: [
+      { ticket_id: 349748, status: 'Open' },
+      { ticket_id: 349747, status: 'Close' },
+      { ticket_id: 349746, status: 'Close' },
+    ],
+  }
+  const table = { ...base, type: 'table', options: {} }
+
+  const withRows = async (props) => {
+    const api = await import('../api')
+    api.data.fetch.mockResolvedValueOnce({ data: tickets })
+    return mount(table, props)
+  }
+
+  it('opens already narrowed to the row the link named', async () => {
+    const { container } = await withRows({ initialSearch: '349748' })
+    const rows = container.querySelectorAll('tbody tr')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].textContent).toContain('349748')
+  })
+
+  it('shows the text in the box, so it is obvious the view is filtered', async () => {
+    const { container } = await withRows({ initialSearch: '349748' })
+    expect(container.querySelector('.table-search').value).toBe('349748')
+  })
+
+  it('leaves the box editable rather than trapping you in one row', async () => {
+    const { container } = await withRows({ initialSearch: '349748' })
+    const box = container.querySelector('.table-search')
+    expect(box.hasAttribute('readonly')).toBe(false)
+    expect(box.hasAttribute('disabled')).toBe(false)
+  })
+
+  it('shows every row when the link carried no search', async () => {
+    const { container } = await withRows({})
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(3)
+  })
+
+  it('shows no rows, not all rows, when nothing matches', async () => {
+    // silently ignoring the filter would be worse: you would think you were
+    // looking at the ticket you clicked
+    const { container } = await withRows({ initialSearch: '999999' })
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(0)
+  })
+})

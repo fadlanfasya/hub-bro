@@ -195,6 +195,60 @@ check("a gap does not turn a numeric sort into a text sort",
       [r["n"] for r in apply_transforms(GAPPY, {"sort": {"column": "n", "dir": "asc"}})["rows"]],
       [9, 10, 100, None])
 
+print("GLPI contracts: start date plus a duration in months")
+from app.transforms import add_months  # noqa: E402
+
+check("12 months on", add_months(datetime(2024, 1, 1), 12), datetime(2025, 1, 1))
+check("3 months on", add_months(datetime(2026, 1, 15), 3), datetime(2026, 4, 15))
+check("crosses a year", add_months(datetime(2025, 11, 30), 4), datetime(2026, 3, 30))
+check("36 months on", add_months(datetime(2024, 4, 30), 36), datetime(2027, 4, 30))
+# 31 Jan + 1 month is 28 Feb, not 3 March
+check("clamps to a short month", add_months(datetime(2026, 1, 31), 1), datetime(2026, 2, 28))
+check("handles a leap year", add_months(datetime(2024, 1, 31), 1), datetime(2024, 2, 29))
+check("31 Aug + 1 is 30 Sep", add_months(datetime(2026, 8, 31), 1), datetime(2026, 9, 30))
+check("zero months is a no-op", add_months(datetime(2026, 5, 4), 0), datetime(2026, 5, 4))
+check("a numeric string duration works", add_months(datetime(2026, 1, 1), "12"), datetime(2027, 1, 1))
+check("no duration gives nothing", add_months(datetime(2026, 1, 1), None), None)
+check("nonsense duration gives nothing", add_months(datetime(2026, 1, 1), "n/a"), None)
+
+CONTRACTS = [
+    {"name": "AppDynamics APPDYN", "begin_date": "2024-01-01", "duration": 12},
+    {"name": "RedHat 2026", "begin_date": "2026-01-01", "duration": 12},
+    {"name": "Cisco smartnet", "begin_date": "2025-09-15", "duration": 12},
+    {"name": "Purestorage 5yr", "begin_date": "2025-09-02", "duration": 63},
+    {"name": "No duration set", "begin_date": "2026-01-01", "duration": None},
+    {"name": "No start date", "begin_date": "", "duration": 12},
+]
+rows, columns = apply_date_diff(
+    CONTRACTS, ["name", "begin_date", "duration"],
+    [{"column": "begin_date", "as": "days_left", "plus_months": "duration"}],
+    now=NOW,
+)
+by = {r["name"]: r["days_left"] for r in rows}
+check("an expired contract is negative", by["AppDynamics APPDYN"] < 0, True)
+check("AppDynamics expired 582 days ago", by["AppDynamics APPDYN"], -582)
+check("a current contract is positive", by["RedHat 2026"], 148)
+check("Cisco smartnet has 40 days left", by["Cisco smartnet"], 40)
+check("a five-year deal is far off", by["Purestorage 5yr"] > 1000, True)
+check("no duration means no end date", by["No duration set"], None)
+check("no start date means no end date", by["No start date"], None)
+
+# the whole point: these become filterable numbers
+urgent = apply_transforms(
+    {"columns": ["name", "begin_date", "duration"], "rows": CONTRACTS},
+    {"date_diff": [{"column": "begin_date", "as": "days_left", "plus_months": "duration"}],
+     "filters": [{"column": "days_left", "op": "lte", "value": 60}],
+     "sort": {"column": "days_left", "dir": "asc"}},
+)
+check("expired and expiring contracts are found", len(urgent["rows"]), 2)
+check("the most overdue comes first", urgent["rows"][0]["name"], "AppDynamics APPDYN")
+check("contracts with no dates are excluded, not counted as expired",
+      all(r["name"] not in ("No duration set", "No start date") for r in urgent["rows"]), True)
+
+check("a fixed number of months also works",
+      apply_date_diff([{"d": "2026-01-01"}], ["d"],
+                      [{"column": "d", "as": "n", "plus_months": 12}], now=NOW)[0][0]["n"], 148)
+
 print("counting for a stat widget")
 MANY = normalize([
     dict(GLPI_LICENSE, id=1, name="A", expire="2025-10-16"),   # expired
@@ -215,6 +269,41 @@ sorted_out = apply_transforms(MANY, {
     "sort": {"column": "days_left", "dir": "asc"},
 })
 check("sorting puts the most urgent first", sorted_out["rows"][0]["name"], "A")
+
+
+print("count_by: several numbers on one widget")
+from app.transforms import apply_count_by  # noqa: E402
+
+BUCKETS = {"column": "days_left",
+           "buckets": [{"as": "expired", "max": -1},
+                       {"as": "soon", "min": 0, "max": 60},
+                       {"as": "healthy", "min": 61}],
+           "unknown_as": "no_dates", "total_as": "total"}
+SAMPLE = [{"days_left": -780}, {"days_left": -1}, {"days_left": 0},
+          {"days_left": 60}, {"days_left": 61}, {"days_left": 5000},
+          {"days_left": None}, {"days_left": "n/a"}]
+rows, cols = apply_count_by(SAMPLE, ["days_left"], BUCKETS)
+r = rows[0]
+check("collapses to exactly one row", len(rows), 1)
+check("expired counts the negatives", r["expired"], 2)
+check("boundaries are inclusive", r["soon"], 2)
+check("healthy takes the rest", r["healthy"], 2)
+check("unparseable values go to the unknown bucket", r["no_dates"], 2)
+check("the buckets add up to the total",
+      r["expired"] + r["soon"] + r["healthy"] + r["no_dates"], r["total"])
+check("columns are the bucket names", cols,
+      ["expired", "soon", "healthy", "no_dates", "total"])
+
+# overlapping ranges must not double count
+overlap = apply_count_by([{"n": 5}], ["n"],
+                         {"column": "n", "buckets": [{"as": "a", "max": 10},
+                                                     {"as": "b", "max": 100}]})[0][0]
+check("the first matching bucket wins", (overlap["a"], overlap["b"]), (1, 0))
+
+check("no buckets is a no-op",
+      apply_count_by([{"n": 1}], ["n"], {"column": "n"})[1], ["n"])
+check("an empty result still produces the columns",
+      apply_count_by([], ["n"], BUCKETS)[0][0]["expired"], 0)
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

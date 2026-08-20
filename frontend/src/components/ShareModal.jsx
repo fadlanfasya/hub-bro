@@ -33,7 +33,7 @@ export default function ShareModal({ dashboard, onChange, onClose }) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="card modal" onClick={(e) => e.stopPropagation()}>
+      <div className="card modal narrow" onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <h3 style={{ margin: 0, flex: 1 }}>Share “{dashboard.name}”</h3>
           <button className="ghost icon" aria-label="Close" onClick={onClose}><X size={16} /></button>

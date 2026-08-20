@@ -30,6 +30,13 @@ const blank = {
   notify_on_recovery: true,
   format: 'slack',
   enabled: true,
+  mode: 'threshold',
+  at: '08:00',
+  days: '',
+  timezone: 'Asia/Jakarta',
+  template: '',
+  body: '',
+  tokenHeader: 'Authorization',
 }
 
 function timeAgo(iso) {
@@ -49,6 +56,8 @@ export default function Alerts() {
   const [form, setForm] = useState(blank)
   const [webhookUrl, setWebhookUrl] = useState('')
   const [hasStoredUrl, setHasStoredUrl] = useState(false)
+  const [token, setToken] = useState('')
+  const [hasStoredToken, setHasStoredToken] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [showForm, setShowForm] = useState(false)
   const [error, setError] = useState('')
@@ -87,11 +96,21 @@ export default function Alerts() {
       repeat_minutes: rule.repeat_minutes,
       notify_on_recovery: rule.notify_on_recovery,
       format: rule.webhook?.format || 'slack',
+      mode: rule.mode || 'threshold',
+      at: rule.schedule?.at || '08:00',
+      days: rule.schedule?.days || '',
+      timezone: rule.schedule?.timezone || 'Asia/Jakarta',
+      template: rule.template || '',
+      body: rule.webhook?.body || '',
+      tokenHeader: Object.keys(rule.webhook?.headers || {})[0] || 'Authorization',
       enabled: rule.enabled,
     })
     // the URL is a credential and comes back masked — untouched means keep it
     setHasStoredUrl(Boolean(rule.webhook?.url))
     setWebhookUrl(rule.webhook?.url ? null : '')
+    const headerNames = Object.keys(rule.webhook?.headers || {})
+    setHasStoredToken(headerNames.length > 0)
+    setToken(headerNames.length ? null : '')
     setShowForm(true)
     setError('')
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -112,8 +131,17 @@ export default function Alerts() {
     for_evaluations: Number(form.for_evaluations),
     repeat_minutes: Number(form.repeat_minutes),
     notify_on_recovery: form.notify_on_recovery,
-    webhook: { url: webhookUrl === null ? MASK : webhookUrl, format: form.format },
+    webhook: {
+      url: webhookUrl === null ? MASK : webhookUrl,
+      format: form.format,
+      headers: token === null ? { [form.tokenHeader || 'Authorization']: MASK }
+        : (token ? { [form.tokenHeader || 'Authorization']: token } : {}),
+      body: form.body,
+    },
     enabled: form.enabled,
+    mode: form.mode,
+    schedule: { at: form.at, days: form.days, timezone: form.timezone },
+    template: form.template,
   })
 
   const submit = async (e) => {
@@ -226,6 +254,54 @@ export default function Alerts() {
             </div>
           </div>
 
+          <label>What this rule does</label>
+          <select value={form.mode} onChange={(e) => set('mode', e.target.value)}>
+            <option value="threshold">Alert when a number crosses a threshold</option>
+            <option value="report">Send a report on a schedule</option>
+          </select>
+          <p className="hint">
+            An alert speaks only when the state changes, so a channel stays quiet
+            when nothing is wrong. A report arrives at its time either way — and
+            its absence is then a signal in itself.
+          </p>
+
+          {form.mode === 'report' ? (
+            <>
+              <div className="field-row">
+                <div style={{ flex: 1 }}>
+                  <label>Send at</label>
+                  <input type="time" value={form.at}
+                    onChange={(e) => set('at', e.target.value)} required />
+                </div>
+                <div style={{ flex: 1.4 }}>
+                  <label>Days <span className="optional">(blank = every day)</span></label>
+                  <input value={form.days} placeholder="mon,tue,wed,thu,fri"
+                    onChange={(e) => set('days', e.target.value)} />
+                </div>
+                <div style={{ flex: 1.2 }}>
+                  <label>Timezone</label>
+                  <input value={form.timezone} placeholder="Asia/Jakarta"
+                    onChange={(e) => set('timezone', e.target.value)} />
+                </div>
+              </div>
+              <p className="hint">
+                The server runs on UTC, so the timezone is what makes 08:00 mean
+                08:00 where you are. A missed window is not made up later —
+                yesterday's numbers arriving today would be worse than nothing.
+              </p>
+
+              <label>Message</label>
+              <textarea rows={3} value={form.template}
+                onChange={(e) => set('template', e.target.value)}
+                placeholder={'Laporan tiket hari ini\nBreach {breach} | Warning {warning} | On track {on_track}'} />
+              <p className="hint">
+                Use <code>{'{column}'}</code> for a value from the query. Pairs with
+                &quot;Count into buckets&quot; on a widget: one query returns one row of
+                named counts, so the numbers in a message can never disagree.
+              </p>
+            </>
+          ) : (
+          <>
           <div className="field-row">
             <div style={{ flex: 1 }}>
               <label>Alert when the value is</label>
@@ -268,13 +344,46 @@ export default function Alerts() {
             stays quiet and only a sustained breach pages you. Recovery is always
             reported immediately.
           </p>
+          </>
+          )}
 
           <label>Send to</label>
           <select value={form.format} onChange={(e) => set('format', e.target.value)}>
             <option value="slack">Slack (or Mattermost / Rocket.Chat)</option>
             <option value="teams">Microsoft Teams</option>
             <option value="generic">Generic JSON</option>
+            <option value="custom">Custom body (WhatsApp gateway, others)</option>
           </select>
+
+          {form.format === 'custom' && (
+            <>
+              <label>Request body</label>
+              <textarea rows={3} value={form.body}
+                onChange={(e) => set('body', e.target.value)}
+                style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5 }}
+                placeholder={'{"target": "6281234567890", "message": "{message}"}'} />
+              <p className="hint">
+                JSON sent to the gateway, with <code>{'{message}'}</code> replaced by the
+                text. Every WhatsApp gateway names its fields differently — Fonnte
+                uses <code>target</code>, Wablas <code>phone</code> — so the body is
+                yours to shape rather than something baked in.
+              </p>
+
+              <div className="field-row">
+                <div style={{ flex: 1 }}>
+                  <label>Token header</label>
+                  <input value={form.tokenHeader}
+                    onChange={(e) => set('tokenHeader', e.target.value)}
+                    placeholder="Authorization" />
+                </div>
+                <div style={{ flex: 2 }}>
+                  <SecretField label="Token"
+                    value={token} hasStored={hasStoredToken} onChange={setToken}
+                    hint="Sent as a header, so it never lands in an access log the way a URL would." />
+                </div>
+              </div>
+            </>
+          )}
           <SecretField label="Webhook URL" required
             value={webhookUrl} hasStored={hasStoredUrl}
             onChange={setWebhookUrl}

@@ -17,6 +17,7 @@ export default function WidgetConfigModal({
   const [opts, setOpts] = useState(widget?.options || {})
 
   const [colsText, setColsText] = useState((widget?.options?.columns || []).join(', '))
+  const [barsText, setBarsText] = useState((widget?.options?.bar_columns || []).join(', '))
   const [renameText, setRenameText] = useState(
     Object.entries(widget?.options?.rename || {}).map(([k, v]) => `${k}=${v}`).join(', ')
   )
@@ -33,6 +34,7 @@ export default function WidgetConfigModal({
   const [unpivotText, setUnpivotText] = useState(
     (widget?.options?.unpivot?.columns || []).join(', ')
   )
+  const [error, setError] = useState('')
   const [showAdvanced, setShowAdvanced] = useState(
     Boolean(widget?.options?.group_by || widget?.options?.filters?.length
       || widget?.options?.sort || widget?.options?.unpivot)
@@ -40,6 +42,15 @@ export default function WidgetConfigModal({
 
   const source = sources.find((s) => s.id === Number(datasourceId))
   const setOpt = (k, v) => setOpts((o) => ({ ...o, [k]: v }))
+
+  /** Patch one count_by bucket, leaving the others alone. */
+  const setBucket = (index, patch) => setOpts((o) => ({
+    ...o,
+    count_by: {
+      ...(o.count_by || {}),
+      buckets: (o.count_by?.buckets || []).map((b, i) => (i === index ? { ...b, ...patch } : b)),
+    },
+  }))
 
   /** Patch one date_diff entry, leaving the others alone. */
   const setDateDiff = (index, patch) => setOpts((o) => ({
@@ -50,9 +61,14 @@ export default function WidgetConfigModal({
     setFilters((rows) => rows.map((r, j) => (j === i ? { ...r, ...patch } : r)))
   const setRule = (i, patch) =>
     setOpt('color_rules', (opts.color_rules || []).map((r, j) => (j === i ? { ...r, ...patch } : r)))
+  const setFormat = (i, patch) =>
+    setOpt('column_format', (opts.column_format || []).map((f, j) => (j === i ? { ...f, ...patch } : f)))
+  const setQuery = (i, patch) =>
+    setOpt('queries', (opts.queries || []).map((q, j) => (j === i ? { ...q, ...patch } : q)))
 
   const save = (e) => {
     e.preventDefault()
+    setError('')
     if (type !== 'text' && !datasourceId) return
     const rename = {}
     for (const pair of renameText.split(',')) {
@@ -64,6 +80,28 @@ export default function WidgetConfigModal({
     const cols = colsText.split(',').map((c) => c.trim()).filter(Boolean)
     if (cols.length) opts.columns = cols
     else delete opts.columns
+
+    const bars = barsText.split(',').map((c) => c.trim()).filter(Boolean)
+    if (bars.length) opts.bar_columns = bars
+    else { delete opts.bar_columns; delete opts.bar_max }
+
+    // A half-typed query row would break the widget, so blank rows are dropped.
+    // A missing join key is different: the queries are real work, so say so
+    // and keep the form open rather than quietly throwing them away.
+    const queries = (opts.queries || []).filter((q) => q.query?.trim())
+    if (queries.length) {
+      if (!opts.join?.on?.trim()) {
+        setError('Fill in "Join on" — the label that matches rows across your queries, '
+          + 'usually instance.')
+        return
+      }
+      opts.queries = queries.map((q, i) => ({ ...q, as: q.as?.trim() || `Query ${i + 1}` }))
+      opts.join = { ...opts.join, on: opts.join.on.trim() }
+      delete opts.query
+    } else {
+      delete opts.queries
+      delete opts.join
+    }
 
     const unpivotColumns = unpivotText.split(',').map((c) => c.trim()).filter(Boolean)
     if (unpivotColumns.length) opts.unpivot = { columns: unpivotColumns, name: 'name', value: 'value' }
@@ -115,6 +153,10 @@ export default function WidgetConfigModal({
       delete opts.thresholds
     }
     // a text widget renders its own content, so it has no data source
+    const cleanFormats = (opts.column_format || []).filter((f) => f.column?.trim())
+    if (cleanFormats.length) opts.column_format = cleanFormats
+    else delete opts.column_format
+
     const cleanRules = (opts.color_rules || []).filter((r) => r.column?.trim() && r.tone)
     if (cleanRules.length) opts.color_rules = cleanRules
     else delete opts.color_rules
@@ -256,6 +298,19 @@ export default function WidgetConfigModal({
             <input value={opts.itemtype || ''} onChange={(e) => setOpt('itemtype', e.target.value)}
               placeholder="Computer" />
             <p className="hint">e.g. Computer, Ticket, Monitor, NetworkEquipment. Defaults to Computer.</p>
+            <label>Fields to return</label>
+            <select value={opts.mode || 'search'}
+              onChange={(e) => setOpt('mode', e.target.value)}>
+              <option value="search">Default columns (GLPI search)</option>
+              <option value="list">Every field (raw)</option>
+            </select>
+            <p className="hint">
+              Search mode returns only the columns GLPI shows in its own list view,
+              which for some item types is just the name. Raw mode returns every
+              stored field — the same thing you see hitting the endpoint directly —
+              but dropdowns come back as ids, so pair it with{' '}
+              <strong>Rename columns</strong> and a column selection.
+            </p>
             <label>Max rows to fetch</label>
             <input type="number" min="1" value={opts.max_rows || ''}
               onChange={(e) => setOpt('max_rows', e.target.value)} placeholder="1000" />
@@ -311,13 +366,70 @@ export default function WidgetConfigModal({
           </>
         )}
 
-        {source?.type === 'prometheus' && (
+        {source?.type === 'prometheus' && type === 'table' && (
+          <>
+            <label>Queries <span className="optional">(one per column)</span></label>
+            {(opts.queries || []).map((q, i) => (
+              <div key={i} className="filter-row">
+                <input style={{ flex: 2 }} value={q.query || ''}
+                  placeholder="sysGlobalHostCpuUsageRatio"
+                  onChange={(e) => setQuery(i, { query: e.target.value })} />
+                <input style={{ flex: 1 }} value={q.as || ''} placeholder="Column name"
+                  onChange={(e) => setQuery(i, { as: e.target.value })} />
+                <button type="button" className="ghost small icon" aria-label="Remove query"
+                  onClick={() => setOpt('queries', (opts.queries || []).filter((_, j) => j !== i))}>
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+            <button type="button" className="link"
+              onClick={() => setOpts((o) => ({
+                ...o,
+                queries: [...(o.queries || []), { query: '', as: '' }],
+                // instance is the one label every scrape carries, so it is the
+                // join key far more often than not — still editable
+                join: { ...(o.join || {}), on: o.join?.on || 'instance' },
+              }))}>
+              <Plus size={13} /> Add query
+            </button>
+
+            {(opts.queries || []).length > 0 && (
+              <>
+                <label>Join on <span className="optional">(a label every query returns)</span></label>
+                <div className="field-row">
+                  <input value={opts.join?.on || ''} placeholder="instance" required
+                    onChange={(e) => setOpt('join', { ...(opts.join || {}), on: e.target.value })} />
+                  <input value={(opts.join?.carry || []).join(', ')} placeholder="Also keep: instance"
+                    onChange={(e) => setOpt('join', {
+                      ...(opts.join || {}),
+                      carry: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
+                    })} />
+                </div>
+                <p className="hint">
+                  Prometheus can't return a table, so each query supplies one column and
+                  they're matched on this label. A device missing from one query keeps its
+                  row with a blank rather than disappearing.
+                </p>
+              </>
+            )}
+          </>
+        )}
+
+        {source?.type === 'prometheus' && type !== 'table' && (
           <>
             <label>PromQL query</label>
             <input value={opts.query || ''} onChange={(e) => setOpt('query', e.target.value)}
               placeholder='rate(http_requests_total[5m])' required />
             {(type === 'line' || type === 'bar') && (
               <>
+                <label>Legend from label <span className="optional">(optional)</span></label>
+                <input value={opts.series_field || ''} placeholder="instance"
+                  onChange={(e) => setOpt('series_field', e.target.value)} />
+                <p className="hint">
+                  Names each line after one label. Blank uses the whole label set,
+                  which gets long once a query carries more than one.
+                </p>
+
                 <label>Time range</label>
                 <select
                   value={opts.range_minutes ? 'fixed' : (opts.follow_dashboard_range ? 'follow' : 'instant')}
@@ -462,6 +574,45 @@ export default function WidgetConfigModal({
               <Plus size={13} /> Add colour rule
             </button>
             <p className="hint">First matching rule wins. Tick "whole row" style by naming the same column in several rules.</p>
+
+            <label>Number format <span className="optional">(per column)</span></label>
+            {(opts.column_format || []).map((spec, i) => (
+              <div key={i} className="filter-row">
+                <input value={spec.column || ''} placeholder="Column"
+                  onChange={(e) => setFormat(i, { column: e.target.value })} />
+                <input type="number" min="0" max="6" style={{ width: 110 }}
+                  value={spec.decimals ?? ''} placeholder="Decimals"
+                  onChange={(e) => setFormat(i, { decimals: e.target.value })} />
+                <input style={{ width: 90 }} value={spec.unit || ''} placeholder="Unit"
+                  onChange={(e) => setFormat(i, { unit: e.target.value })} />
+                <button type="button" className="ghost small icon" aria-label="Remove format"
+                  onClick={() => setOpt('column_format',
+                    (opts.column_format || []).filter((_, j) => j !== i))}>
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+            <button type="button" className="link"
+              onClick={() => setOpt('column_format',
+                [...(opts.column_format || []), { column: '', decimals: 1, unit: '' }])}>
+              <Plus size={13} /> Add number format
+            </button>
+            <p className="hint">
+              Only changes what's shown — sorting and colour rules still use the full value.
+            </p>
+
+            <label>Bar columns <span className="optional">(comma separated)</span></label>
+            <div className="field-row">
+              <input value={barsText} onChange={(e) => setBarsText(e.target.value)}
+                placeholder="CPU Utilization, Memory Utilization" />
+              <input type="number" style={{ width: 130 }} min="0"
+                value={opts.bar_max ?? ''} placeholder="Max"
+                onChange={(e) => setOpt('bar_max', e.target.value)} />
+            </div>
+            <p className="hint">
+              Draws a fill behind the number. Leave Max blank to scale to the busiest
+              row — percentage columns snap to 0–100 on their own.
+            </p>
 
             <label style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
               <input type="checkbox" style={{ width: 'auto' }}
@@ -790,23 +941,48 @@ export default function WidgetConfigModal({
               <span className="optional"> — for expiry and age</span>
             </label>
             {(opts.date_diff || []).map((d, i) => (
-              <div className="field-row" key={i} style={{ marginBottom: 6 }}>
-                <input style={{ flex: 2 }} value={d.column || ''} placeholder="expire"
-                  onChange={(e) => setDateDiff(i, { column: e.target.value })} />
-                <select style={{ flex: 1.2 }} value={d.direction || 'until'}
-                  onChange={(e) => setDateDiff(i, { direction: e.target.value })}>
-                  <option value="until">until (expiry)</option>
-                  <option value="since">since (age)</option>
-                </select>
-                <select style={{ width: 96 }} value={d.unit || 'days'}
-                  onChange={(e) => setDateDiff(i, { unit: e.target.value })}>
-                  <option value="days">days</option>
-                  <option value="hours">hours</option>
-                  <option value="minutes">minutes</option>
-                </select>
-                <input style={{ flex: 1.3 }} value={d.as || ''} placeholder="days_left"
-                  onChange={(e) => setDateDiff(i, { as: e.target.value })} />
-                <button type="button" className="danger ghost small icon" aria-label="Remove"
+              <div className="field-grid" key={i}
+                style={{ gridTemplateColumns: '1.6fr 1.1fr .8fr 1.2fr 1.2fr 1.2fr auto' }}>
+                <div>
+                  <span className="cap">Date column</span>
+                  <input value={d.column || ''} placeholder="expire"
+                    onChange={(e) => setDateDiff(i, { column: e.target.value })} />
+                </div>
+                <div>
+                  <span className="cap">Direction</span>
+                  <select value={d.direction || 'until'}
+                    onChange={(e) => setDateDiff(i, { direction: e.target.value })}>
+                    <option value="until">until</option>
+                    <option value="since">since</option>
+                  </select>
+                </div>
+                <div>
+                  <span className="cap">Unit</span>
+                  <select value={d.unit || 'days'}
+                    onChange={(e) => setDateDiff(i, { unit: e.target.value })}>
+                    <option value="days">days</option>
+                    <option value="hours">hours</option>
+                    <option value="minutes">minutes</option>
+                  </select>
+                </div>
+                <div>
+                  <span className="cap">+ months from</span>
+                  <input value={d.plus_months || ''} placeholder="duration"
+                    title="Column holding a duration in months, e.g. a GLPI contract's duration"
+                    onChange={(e) => setDateDiff(i, { plus_months: e.target.value })} />
+                </div>
+                <div>
+                  <span className="cap">Number column</span>
+                  <input value={d.as || ''} placeholder="days_left"
+                    onChange={(e) => setDateDiff(i, { as: e.target.value })} />
+                </div>
+                <div>
+                  <span className="cap">Month column</span>
+                  <input value={d.label_as || ''} placeholder="expires_month"
+                    title="Also output the resolved date as a YYYY-MM label, for grouping into a chart"
+                    onChange={(e) => setDateDiff(i, { label_as: e.target.value })} />
+                </div>
+                <button type="button" className="danger ghost small icon remove" aria-label="Remove this date column"
                   onClick={() => setOpt('date_diff', opts.date_diff.filter((_, j) => j !== i))}>
                   <X size={13} />
                 </button>
@@ -821,7 +997,71 @@ export default function WidgetConfigModal({
               Adds a numeric column you can threshold, colour and sort on — a date
               cannot be. Negative means already past, so an expired licence reads
               as <code>-294</code>. Rows with no date stay empty rather than
-              counting as zero.
+              counting as zero. Use <strong>+ months</strong> when the end date is
+              not stored: a GLPI contract keeps <code>begin_date</code> and a{' '}
+              <code>duration</code> in months, so put <code>duration</code> there.
+            </p>
+
+            <label>Count into buckets
+              <span className="optional"> — several numbers on one widget</span>
+            </label>
+            <div className="field-grid" style={{ gridTemplateColumns: '1fr 1fr 1fr', marginBottom: 6 }}>
+              <div>
+                <span className="cap">Column to count</span>
+                <input value={opts.count_by?.column || ''} placeholder="days_left, value"
+                  onChange={(e) => setOpt('count_by', { ...(opts.count_by || {}), column: e.target.value })} />
+              </div>
+              <div>
+                <span className="cap">Name for blanks</span>
+                <input value={opts.count_by?.unknown_as || ''} placeholder="optional"
+                  onChange={(e) => setOpt('count_by', { ...(opts.count_by || {}), unknown_as: e.target.value })} />
+              </div>
+              <div>
+                <span className="cap">Name for the total</span>
+                <input value={opts.count_by?.total_as || ''} placeholder="optional"
+                  onChange={(e) => setOpt('count_by', { ...(opts.count_by || {}), total_as: e.target.value })} />
+              </div>
+            </div>
+            {(opts.count_by?.buckets || []).map((b, i) => (
+              <div className="field-grid" key={i}
+                style={{ gridTemplateColumns: '1.6fr 1fr 1fr auto' }}>
+                <div>
+                  <span className="cap">Name it</span>
+                  <input value={b.as || ''} placeholder="expired"
+                    onChange={(e) => setBucket(i, { as: e.target.value })} />
+                </div>
+                <div>
+                  <span className="cap">From (blank = no limit)</span>
+                  <input value={b.min ?? ''} placeholder="—"
+                    onChange={(e) => setBucket(i, { min: e.target.value })} />
+                </div>
+                <div>
+                  <span className="cap">To (inclusive)</span>
+                  <input value={b.max ?? ''} placeholder="-1"
+                    onChange={(e) => setBucket(i, { max: e.target.value })} />
+                </div>
+                <button type="button" className="danger ghost small icon remove" aria-label="Remove bucket"
+                  onClick={() => setOpt('count_by', {
+                    ...opts.count_by,
+                    buckets: opts.count_by.buckets.filter((_, j) => j !== i),
+                  })}>
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+            <button type="button" className="link"
+              onClick={() => setOpt('count_by', {
+                ...(opts.count_by || {}),
+                buckets: [...(opts.count_by?.buckets || []), { as: '', min: '', max: '' }],
+              })}>
+              <Plus size={13} /> Add a bucket
+            </button>
+            <p className="hint">
+              Replaces the rows with a single row holding one count per bucket, so a
+              stat widget can headline one number and show the others underneath.
+              Ranges are inclusive and the first match wins, so the counts always add
+              up. Rows with no value land in the optional <em>unknown</em> bucket
+              rather than being counted as zero.
             </p>
 
             <label>Split columns into rows <span className="optional">(unpivot)</span></label>
@@ -906,6 +1146,8 @@ export default function WidgetConfigModal({
               onChange={(e) => setOpt('limit', e.target.value)} placeholder="10" />
           </div>
         )}
+
+        {error && <p className="error" role="alert">{error}</p>}
 
         <div className="modal-footer">
           <button type="button" className="secondary" onClick={onClose}>Cancel</button>

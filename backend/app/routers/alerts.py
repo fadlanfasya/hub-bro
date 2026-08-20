@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from .. import access, alerting
+from .. import access, alerting, reports
 from ..database import get_db
 from ..models import AlertNotification, AlertRule, DataSource, User
 from ..permissions import require_alert_edit, require_alert_view
@@ -30,13 +30,24 @@ def _editable_rule(rule_id: int, user: User, db: Session) -> AlertRule:
 
 
 VALID_AGGREGATES = {"first", "sum", "avg", "min", "max", "count"}
-VALID_FORMATS = {"generic", "slack", "teams"}
+VALID_FORMATS = {"generic", "slack", "teams", "custom"}
+VALID_MODES = {"threshold", "report"}
 MIN_INTERVAL = 30
 
 
 class Webhook(BaseModel):
     url: str = ""
     format: str = "generic"
+    # header name -> value; used for a gateway token, stored encrypted
+    headers: dict[str, str] = {}
+    # JSON body template with {message}, for format "custom"
+    body: str = ""
+
+
+class Schedule(BaseModel):
+    at: str = ""                     # "08:00"
+    days: str = ""                   # "mon,tue,..." or blank for every day
+    timezone: str = "Asia/Jakarta"
 
 
 class AlertIn(BaseModel):
@@ -52,6 +63,9 @@ class AlertIn(BaseModel):
     notify_on_recovery: bool = True
     webhook: Webhook = Webhook()
     enabled: bool = True
+    mode: str = "threshold"
+    schedule: Schedule = Schedule()
+    template: str = ""
 
 
 def _validate(body: AlertIn, db: Session, user: User):
@@ -69,6 +83,28 @@ def _validate(body: AlertIn, db: Session, user: User):
     if body.webhook.format not in VALID_FORMATS:
         raise HTTPException(status_code=400,
                             detail=f"Webhook format must be one of {sorted(VALID_FORMATS)}")
+    if body.mode not in VALID_MODES:
+        raise HTTPException(status_code=400,
+                            detail=f"Mode must be one of {sorted(VALID_MODES)}")
+
+    if body.mode == "report":
+        # A report has no threshold to satisfy; its guard is the clock, so the
+        # clock is what must be valid.
+        if reports.parse_time(body.schedule.at) is None:
+            raise HTTPException(status_code=400,
+                                detail="Set a send time as HH:MM, for example 08:00")
+        if not body.template.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Write the message to send, using {column} for a value.",
+            )
+        if body.webhook.format == "custom" and not body.webhook.body.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="A custom webhook needs a JSON body containing {message}.",
+            )
+        return
+
     if alerting.number_or_none(body.thresholds.get("warn")) is None and \
             alerting.number_or_none(body.thresholds.get("critical")) is None:
         raise HTTPException(
@@ -83,7 +119,8 @@ def _validate(body: AlertIn, db: Session, user: User):
         )
 
 
-def _apply(rule: AlertRule, body: AlertIn, existing_url: str = ""):
+def _apply(rule: AlertRule, body: AlertIn, existing_url: str = "",
+           existing_headers: dict | None = None):
     rule.name = body.name.strip()
     rule.datasource_id = body.datasource_id
     rule.options = json.dumps(body.options or {})
@@ -95,13 +132,28 @@ def _apply(rule: AlertRule, body: AlertIn, existing_url: str = ""):
     rule.repeat_minutes = max(0, body.repeat_minutes)
     rule.notify_on_recovery = body.notify_on_recovery
     rule.enabled = body.enabled
+    rule.mode = body.mode
+    rule.schedule = json.dumps(body.schedule.model_dump())
+    rule.template = body.template or None
 
     # the URL is masked in responses, so a form round-trip sends the mask back
     url = body.webhook.url
     keep = url in (MASK, "") and existing_url
+    # header values are credentials too, and round-trip as the mask
+    stored_headers = existing_headers or {}
+    headers = {}
+    for name, value in (body.webhook.headers or {}).items():
+        if not name.strip():
+            continue
+        if value in (MASK, "") and stored_headers.get(name):
+            headers[name] = stored_headers[name]
+        elif value:
+            headers[name] = encrypt(value)
     rule.webhook = json.dumps({
         "url": existing_url if keep else encrypt(url),
         "format": body.webhook.format,
+        "headers": headers,
+        "body": body.webhook.body or "",
     })
 
 
@@ -141,8 +193,8 @@ def update_rule(rule_id: int, body: AlertIn, user: User = Depends(require_alert_
                 db: Session = Depends(get_db)):
     rule = _editable_rule(rule_id, user, db)
     _validate(body, db, user)
-    existing = json.loads(rule.webhook or "{}").get("url") or ""
-    _apply(rule, body, existing)
+    stored = json.loads(rule.webhook or "{}")
+    _apply(rule, body, stored.get("url") or "", stored.get("headers") or {})
     db.commit()
     db.refresh(rule)
     return alerting.rule_to_dict(rule)
@@ -167,11 +219,11 @@ async def test_rule(rule_id: int, user: User = Depends(require_alert_edit),
     """
     rule = _editable_rule(rule_id, user, db)
 
-    payload = alerting.build_payload(
-        rule.name, "ok", rule.last_value,
-        "This is a test from Hub-Bro. If you can read this, the webhook works.",
-        "test", rule.webhook_dict.get("format") or "generic",
-    )
+    text = "This is a test from Hub-Bro. If you can read this, the webhook works."
+    try:
+        payload = alerting.payload_for(rule, "ok", rule.last_value, text, "test")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     ok, error = await alerting.send_webhook(rule.webhook_dict, payload)
     alerting.record(db, rule, "ok", rule.last_value, "Test message", "test", ok, error)
     alerting.prune_notifications(db, rule.id)

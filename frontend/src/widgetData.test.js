@@ -321,3 +321,188 @@ describe('buildOptions passes date_diff through', () => {
     expect(buildOptions({ options: { date_diff: [] } }).date_diff).toBeUndefined()
   })
 })
+
+describe('buildOptions forwards the GLPI fetch mode', () => {
+  it('sends list mode when chosen', () => {
+    expect(buildOptions({ options: { itemtype: 'PlanningExternalEvent', mode: 'list' } }).mode)
+      .toBe('list')
+  })
+
+  it('omits the default so existing widgets are untouched', () => {
+    expect(buildOptions({ options: { itemtype: 'Ticket', mode: 'search' } }).mode).toBeUndefined()
+    expect(buildOptions({ options: { itemtype: 'Ticket' } }).mode).toBeUndefined()
+  })
+})
+
+describe('buildOptions forwards count_by', () => {
+  const cb = { column: 'days_left', buckets: [{ as: 'expired', max: -1 }] }
+
+  it('sends a configured bucket set', () => {
+    expect(buildOptions({ options: { count_by: cb } }).count_by).toEqual(cb)
+  })
+
+  it('ignores a half-configured one', () => {
+    expect(buildOptions({ options: { count_by: { column: 'days_left' } } }).count_by).toBeUndefined()
+    expect(buildOptions({ options: { count_by: { buckets: [{ as: 'x' }] } } }).count_by).toBeUndefined()
+    expect(buildOptions({ options: {} }).count_by).toBeUndefined()
+  })
+})
+
+describe('computeStat picking a field from a Prometheus result', () => {
+  // exactly what count(sysCmFailoverStatusId{job="f5ltm"}) comes back as
+  const counted = {
+    columns: ['time', 'series', 'value'],
+    rows: [{ time: 1755200000, series: 'value', value: 8 }],
+  }
+
+  it('shows the value, not the timestamp', () => {
+    const { field, value } = computeStat(counted.rows, counted.columns, {})
+    expect(field).toBe('value')
+    expect(value).toBe(8)
+  })
+
+  it('still counts rows when asked to', () => {
+    // count() already reduced it, so one row is the honest answer here
+    expect(computeStat(counted.rows, counted.columns, { aggregate: 'count' }).value).toBe(1)
+  })
+
+  it('counts devices from an unreduced query', () => {
+    const perDevice = {
+      columns: ['time', 'series', 'metric', 'instance', 'value'],
+      rows: [
+        { time: 1, instance: 'STL-L02-R10-ELTM01', value: 3 },
+        { time: 1, instance: 'STL-L02-R10-ELTM02', value: 4 },
+        { time: 1, instance: 'STLL02R06-NLTM01', value: 3 },
+      ],
+    }
+    expect(computeStat(perDevice.rows, perDevice.columns, { aggregate: 'count' }).value).toBe(3)
+    expect(computeStat(perDevice.rows, perDevice.columns, {}).field).toBe('value')
+  })
+
+  it('honours an explicit value field over the guess', () => {
+    expect(computeStat(counted.rows, counted.columns, { value_field: 'time' }).value)
+      .toBe(1755200000)
+  })
+
+  it('falls back when the only number is called time', () => {
+    const odd = { columns: ['name', 'time'], rows: [{ name: 'a', time: 42 }] }
+    expect(computeStat(odd.rows, odd.columns, {}).field).toBe('time')
+  })
+
+  it('is unchanged for a plain result with no time column', () => {
+    const plain = { columns: ['status', 'total'], rows: [{ status: 'ok', total: 23159 }] }
+    expect(computeStat(plain.rows, plain.columns, {}).field).toBe('total')
+  })
+})
+
+describe('buildOptions carries a multi-query table to the server', () => {
+  const widget = (options) => ({ id: 'w1', datasource_id: 1, type: 'table', options })
+
+  const f5 = widget({
+    queries: [
+      { query: 'sysGlobalHostCpuUsageRatio{job="f5ltm"}', as: 'CPU' },
+      { query: 'sysCmFailoverStatusId{job="f5ltm"}', as: 'Failover' },
+    ],
+    join: { on: 'instance' },
+    bar_columns: ['CPU'],
+    color_rules: [{ column: 'CPU', op: 'gte', value: 80, tone: 'bad' }],
+  })
+
+  it('sends every query', () => {
+    const out = buildOptions(f5, null, null)
+    expect(out.queries).toHaveLength(2)
+    expect(out.queries[0].as).toBe('CPU')
+  })
+
+  it('sends the join key', () => {
+    expect(buildOptions(f5, null, null).join).toEqual({ on: 'instance' })
+  })
+
+  it('keeps browser-only options out of the request', () => {
+    const out = buildOptions(f5, null, null)
+    expect(out.bar_columns).toBeUndefined()
+    expect(out.color_rules).toBeUndefined()
+  })
+
+  it('drops half-typed query rows', () => {
+    const out = buildOptions(widget({
+      queries: [{ query: 'up', as: 'Up' }, { query: '', as: 'Blank' }],
+      join: { on: 'instance' },
+    }), null, null)
+    expect(out.queries).toHaveLength(1)
+  })
+
+  it('sends nothing to join on without a key', () => {
+    const out = buildOptions(widget({ queries: [{ query: 'up' }] }), null, null)
+    expect(out.queries).toBeUndefined()
+    expect(out.join).toBeUndefined()
+  })
+
+  it('still sends a plain single query', () => {
+    expect(buildOptions(widget({ query: 'up' }), null, null).query).toBe('up')
+  })
+
+  it('prefers the query set over a leftover single query', () => {
+    const out = buildOptions(widget({
+      query: 'old_metric',
+      queries: [{ query: 'up', as: 'Up' }],
+      join: { on: 'instance' },
+    }), null, null)
+    expect(out.query).toBeUndefined()
+    expect(out.queries).toHaveLength(1)
+  })
+})
+
+describe('charting a Prometheus range query', () => {
+  // what a range query looks like now that labels are their own columns
+  const columns = ['time', 'series', 'metric', 'instance', 'job', 'value']
+  const rows = [
+    { time: 100, series: 'instance=ELTM01,job=f5ltm', instance: 'ELTM01', job: 'f5ltm', value: 5 },
+    { time: 100, series: 'instance=NLTM01,job=f5ltm', instance: 'NLTM01', job: 'f5ltm', value: 29 },
+    { time: 160, series: 'instance=ELTM01,job=f5ltm', instance: 'ELTM01', job: 'f5ltm', value: 6 },
+    { time: 160, series: 'instance=NLTM01,job=f5ltm', instance: 'NLTM01', job: 'f5ltm', value: 31 },
+  ]
+
+  it('is still recognised as a Prometheus result', () => {
+    // it used to be matched by an exact column list, which the label columns broke
+    const { xKey, yKeys } = resolveChartFields(columns, rows, {})
+    expect(xKey).toBe('time')
+    expect(yKeys).toHaveLength(2)
+  })
+
+  it('draws one line per series, sharing an X axis', () => {
+    const { rows: out } = resolveChartFields(columns, rows, {})
+    expect(out).toHaveLength(2)
+    expect(out[0]['instance=ELTM01,job=f5ltm']).toBe(5)
+    expect(out[0]['instance=NLTM01,job=f5ltm']).toBe(29)
+  })
+
+  it('never plots time against itself', () => {
+    const { yKeys } = resolveChartFields(columns, rows, {})
+    expect(yKeys).not.toContain('time')
+  })
+
+  it('names lines after one label when asked', () => {
+    const { yKeys, rows: out } = resolveChartFields(columns, rows, { series_field: 'instance' })
+    expect(yKeys).toEqual(['ELTM01', 'NLTM01'])
+    expect(out[0].ELTM01).toBe(5)
+  })
+
+  it('ignores a label the result does not have', () => {
+    const { yKeys } = resolveChartFields(columns, rows, { series_field: 'sysName' })
+    expect(yKeys).toEqual(['instance=ELTM01,job=f5ltm', 'instance=NLTM01,job=f5ltm'])
+  })
+
+  it('still handles the old three-column shape', () => {
+    const old = [{ time: 1, series: 'up', value: 1 }]
+    expect(resolveChartFields(['time', 'series', 'value'], old, {}).yKeys).toEqual(['up'])
+  })
+
+  it('leaves a joined table alone', () => {
+    // no series column, so this is an ordinary table, not a Prometheus result
+    const joined = [{ instance: 'ELTM01', CPU: 5 }]
+    const { xKey, yKeys } = resolveChartFields(['instance', 'CPU'], joined, {})
+    expect(xKey).toBe('instance')
+    expect(yKeys).toEqual(['CPU'])
+  })
+})

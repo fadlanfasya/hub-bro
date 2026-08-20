@@ -87,11 +87,15 @@ class DashboardCreate(BaseModel):
     # workspace | private. Chosen when the dashboard is created, so a private
     # one is never briefly visible to everyone before it gets locked down.
     visibility: Optional[str] = None
+    folder: Optional[str] = None
 
 
 class DashboardUpdate(BaseModel):
     name: Optional[str] = None
     definition: Optional[dict[str, Any]] = None
+    # "" moves a dashboard out of its folder; None leaves it where it is
+    folder: Optional[str] = None
+    pinned: Optional[bool] = None
     # the version the client last saw; a mismatch means someone else saved
     # in the meantime and this write is rejected rather than clobbering theirs
     version: Optional[int] = None
@@ -104,6 +108,8 @@ class DashboardOut(BaseModel):
     share_token: Optional[str] = None
     version: int = 1
     visibility: str = "workspace"
+    folder: Optional[str] = None
+    pinned: bool = False
     owner_id: Optional[int] = None
 
 

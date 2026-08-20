@@ -20,6 +20,8 @@ export default function PublicDashboard() {
   const [params] = useSearchParams()
   const kiosk = params.get('kiosk') === '1'
   const kioskRefresh = Number(params.get('refresh')) || 60
+  // ?q= narrows every table on the page, so a drill-down link can land on one row
+  const initialSearch = (params.get('q') || '').trim()
 
   const [dashboard, setDashboard] = useState(null)
   const [error, setError] = useState('')
@@ -97,7 +99,8 @@ export default function PublicDashboard() {
               </div>
               <div className="widget-body">
                 <WidgetRenderer widget={item.widget} refreshKey={refreshKey}
-                  publicToken={token} onData={captureStatus} />
+                  publicToken={token} onData={captureStatus}
+                  initialSearch={initialSearch} />
               </div>
             </div>
           )}

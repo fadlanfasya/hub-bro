@@ -20,9 +20,21 @@ ADDED_COLUMNS = {
         # existing content stays visible to everyone — turning privacy on by
         # default would make colleagues' dashboards vanish on upgrade
         "visibility": "VARCHAR DEFAULT 'workspace'",
+        # NULL means "not in a folder", which is where every existing dashboard
+        # starts — nothing moves under someone on upgrade
+        "folder": "VARCHAR",
+        "pinned": "BOOLEAN DEFAULT 0",
     },
     "datasources": {
         "visibility": "VARCHAR DEFAULT 'workspace'",
+    },
+    "alert_rules": {
+        # existing rules keep alerting on thresholds; nothing starts reporting
+        # on a schedule until someone asks it to
+        "mode": "VARCHAR DEFAULT 'threshold'",
+        "schedule": "TEXT DEFAULT '{}'",
+        "template": "TEXT",
+        "last_report_at": "DATETIME",
     },
     "users": {
         "role": "VARCHAR DEFAULT 'viewer'",

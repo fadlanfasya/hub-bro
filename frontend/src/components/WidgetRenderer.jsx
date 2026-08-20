@@ -5,7 +5,7 @@ import {
 } from 'recharts'
 import { Link } from 'react-router-dom'
 import { AlertCircle, TrendingUp, TrendingDown, Minus, Search, ExternalLink } from 'lucide-react'
-import { buildLinkUrl, linkProps } from '../links'
+import { buildLinkUrl, linkProps, withOrigin } from '../links'
 import { data as dataApi, publicApi } from '../api'
 import { describeThreshold, evaluateThreshold } from '../thresholds'
 import { computeTrend, formatStatValue, formatTrend } from '../format'
@@ -18,7 +18,8 @@ import Sparkline from './Sparkline'
 import Gauge from './Gauge'
 import Markdown from './Markdown'
 import {
-  activeFilterCount, applyTableFilters, isNumeric, nextSort, sortRows, toneForCell,
+  activeFilterCount, applyTableFilters, barColumnSet, barFraction, barMaxFor,
+  formatCell, formatSpecFor, isNumeric, nextSort, sortRows, toneForCell,
 } from '../tableRules'
 import ColumnFilter from './ColumnFilter'
 import { canEmitSelection, crossFiltersFor, isSelected } from '../selection'
@@ -39,7 +40,7 @@ export default function WidgetRenderer(props) {
 
 function WidgetData({
   widget, refreshKey, publicToken, onData, dashboardRange, dashboardId, readOnly,
-  selection, onSelect,
+  selection, onSelect, initialSearch,
 }) {
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
@@ -95,7 +96,8 @@ function WidgetData({
   // The truncated/stale warning is reported upward and drawn in the widget
   // header, so it never steals height from the chart or table.
   return (
-    <WidgetPlot widget={widget} result={result} selection={selection} onSelect={onSelect} />
+    <WidgetPlot widget={widget} result={result} selection={selection} onSelect={onSelect}
+      dashboardId={dashboardId} initialSearch={initialSearch} />
   )
 }
 
@@ -179,12 +181,14 @@ function CellLink({ href, text }) {
 }
 
 /** Table with click-to-sort headers and per-cell colour rules. */
-function DataTable({ columns, rows, opts, selection, onSelect }) {
+function DataTable({ columns, rows, opts, selection, onSelect, dashboardId, initialSearch }) {
   const [sort, setSort] = useState(
     opts.sort_column ? { column: opts.sort_column, direction: opts.sort_dir || 'asc' } : null
   )
-  // interactive filters, deliberately not persisted — see tableRules.js
-  const [search, setSearch] = useState('')
+  // Interactive filters, deliberately not persisted — see tableRules.js.
+  // A ?q= in the URL seeds the box so a drill-down link opens on its row; the
+  // box stays editable, so this narrows the view without trapping anyone in it.
+  const [search, setSearch] = useState(initialSearch || '')
   const [columnFilters, setColumnFilters] = useState({})
 
   const shown = visibleColumns(columns, opts.columns)
@@ -199,6 +203,14 @@ function DataTable({ columns, rows, opts, selection, onSelect }) {
   const visible = sorted.slice(0, limit)
   const numericColumns = new Set(
     shown.filter((c) => rows.length && rows.every((r) => r[c] == null || isNumeric(r[c])))
+  )
+
+  // bar scales come from the full result, not the filtered view, so searching
+  // the table doesn't silently rescale every bar in it
+  const barColumns = barColumnSet(opts.bar_columns)
+  const barMaxes = new Map(
+    shown.filter((c) => barColumns.has(c))
+      .map((c) => [c, barMaxFor(rows, c, opts.bar_max?.[c] ?? opts.bar_max)])
   )
 
   const filterCount = activeFilterCount(columnFilters)
@@ -247,13 +259,22 @@ function DataTable({ columns, rows, opts, selection, onSelect }) {
               onClick={onSelect ? () => onSelect(keyColumn, r[keyColumn]) : undefined}>
               {shown.map((c) => {
                 const tone = toneForCell(r, c, rules)
-                const href = buildLinkUrl(opts.column_links?.[c], r)
-                const text = String(r[c] ?? '')
+                const href = withOrigin(buildLinkUrl(opts.column_links?.[c], r), dashboardId)
+                const spec = formatSpecFor(opts.column_format, c)
+                const text = spec ? formatCell(r[c], spec) : String(r[c] ?? '')
+                const fraction = barMaxes.has(c) ? barFraction(r[c], barMaxes.get(c)) : null
+                const body = href ? <CellLink href={href} text={text} /> : text
                 return (
                   <td key={c}
                     className={[numericColumns.has(c) ? 'num' : '', tone ? `tone-${tone}` : '']
                       .filter(Boolean).join(' ')}>
-                    {href ? <CellLink href={href} text={text} /> : text}
+                    {fraction === null ? body : (
+                      <span className="cell-bar">
+                        <span className={`cell-bar-fill${tone ? ` tone-${tone}` : ''}`}
+                          style={{ width: `${(fraction * 100).toFixed(2)}%` }} />
+                        <span className="cell-bar-text">{body}</span>
+                      </span>
+                    )}
                   </td>
                 )
               })}
@@ -286,7 +307,7 @@ function DataTable({ columns, rows, opts, selection, onSelect }) {
   )
 }
 
-function WidgetPlot({ widget, result, selection, onSelect }) {
+function WidgetPlot({ widget, result, selection, onSelect, dashboardId, initialSearch }) {
   const { rows, columns } = result
   const opts = widget.options || {}
   // only pie/bar/table can raise a selection, and only when the parent is listening
@@ -371,7 +392,8 @@ function WidgetPlot({ widget, result, selection, onSelect }) {
 
   if (widget.type === 'table') {
     return (
-      <DataTable columns={columns} rows={rows} opts={opts}
+      <DataTable columns={columns} rows={rows} opts={opts} dashboardId={dashboardId}
+        initialSearch={initialSearch}
         selection={selection} onSelect={emits ? select : undefined} />
     )
   }

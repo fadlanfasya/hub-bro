@@ -1,0 +1,126 @@
+name: Release
+
+# Deliberately manual: Actions tab -> Release -> Run workflow.
+#
+# The server watches Docker Hub and pulls on its own (Watchtower), so pressing
+# this button is what puts code in front of your colleagues. Tests run again
+# here rather than trusting an earlier green run — the thing being released
+# should be the thing that was tested.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag — leave blank for an automatic date+commit tag"
+        required: false
+      latest:
+        description: "Also move the 'latest' tag (this is what the server pulls)"
+        type: boolean
+        default: true
+      notes:
+        description: "What changed (appears in the run summary)"
+        required: false
+
+concurrency:
+  # never let two releases race to the same tag
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Tests must pass first
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Backend
+        working-directory: backend
+        env:
+          SECRET_KEY: ci-test-secret-key-not-used-anywhere-real
+        run: |
+          pip install -r requirements.txt sqlglot
+          failed=0
+          for suite in tests/test_*.py; do
+            python "$suite" || failed=1
+          done
+          exit $failed
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Frontend
+        working-directory: frontend
+        run: |
+          npm ci || npm install
+          npm test
+          npm run build
+
+  publish:
+    name: Build and push to Docker Hub
+    runs-on: ubuntu-latest
+    needs: verify
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work out the tag
+        id: tag
+        # Blank input is the normal case: press Run, get a tag derived from the
+        # date and commit. Costs nothing to produce and means the version
+        # running on the server can always be traced back to source — which is
+        # useful for "when did this change?" even if you never roll back.
+        run: |
+          TAG="${{ github.event.inputs.version }}"
+          if [ -z "$TAG" ]; then
+            TAG="$(date +%Y.%m.%d)-$(git rev-parse --short HEAD)"
+            echo "No version given, using $TAG"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/hub-bro:${{ steps.tag.outputs.tag }}
+            ${{ github.event.inputs.latest == 'true' && format('{0}/hub-bro:latest', secrets.DOCKERHUB_USERNAME) || '' }}
+
+      - name: Tag the commit
+        # so a running version can always be traced back to source
+        continue-on-error: true      # a duplicate tag must not fail the release
+        run: |
+          git tag "v${{ steps.tag.outputs.tag }}"
+          git push origin "v${{ steps.tag.outputs.tag }}"
+
+      - name: Summary
+        run: |
+          {
+            echo "### Released ${{ steps.tag.outputs.tag }}"
+            echo ""
+            echo "${{ github.event.inputs.notes || '_no notes_' }}"
+            echo ""
+            if [ "${{ github.event.inputs.latest }}" = "true" ]; then
+              echo "\`latest\` moved — the server will pull within a few minutes."
+            else
+              echo "\`latest\` NOT moved, so the server keeps running the old image."
+              echo "Deploy by hand when ready."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

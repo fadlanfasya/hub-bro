@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import Dashboard, DataSource
-from .data import _run
+from .data import _dispatch
 
 router = APIRouter(prefix="/api/public", tags=["public"])
 
@@ -68,4 +68,4 @@ async def fetch_public_data(token: str, payload: PublicFetchRequest,
     if not ds:
         raise HTTPException(status_code=404, detail="Data source not found")
 
-    return await _run(ds, widget.get("options") or {}, db)
+    return await _dispatch(ds, widget.get("options") or {}, db)

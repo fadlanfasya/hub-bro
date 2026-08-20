@@ -55,7 +55,7 @@ function Sidebar() {
         <NavLink to="/" end className={navClass} title="Dashboards">
           <LayoutDashboard size={16} />{!rail && <span>Dashboards</span>}
         </NavLink>
-        {can('datasource.view') && (
+        {can('datasource.manage') && (
           <NavLink to="/datasources" className={navClass} title="Data sources">
             <Database size={16} />{!rail && <span>Data sources</span>}
           </NavLink>
@@ -116,7 +116,7 @@ function AppRoutes() {
                 <Route path="/dashboards/:id" element={<DashboardEditor />} />
                 <Route path="/account" element={<Account />} />
                 <Route path="/datasources" element={
-                  <RequireCapability capability="datasource.view"><DataSources /></RequireCapability>
+                  <RequireCapability capability="datasource.manage"><DataSources /></RequireCapability>
                 } />
                 <Route path="/health" element={
                   <RequireCapability capability="datasource.health"><Health /></RequireCapability>

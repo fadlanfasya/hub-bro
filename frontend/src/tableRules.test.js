@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  TONES, TONE_KEYS, activeFilterCount, applyTableFilters, distinctValues,
+  TONES, TONE_KEYS, activeFilterCount, applyTableFilters, barColumnSet,
+  barFraction, barMaxFor, distinctValues, formatCell, formatSpecFor,
   isNumeric, matchesSearch, nextSort, sortRows, toneForCell,
 } from './tableRules'
 import { isAlignmentRow, parseInline, parseMarkdown, splitRow } from './markdown'
@@ -518,5 +519,166 @@ describe('splitRow / isAlignmentRow', () => {
     for (const row of ['| a | b |', '', undefined, '| 1 | 2 |', '| - a |']) {
       expect(isAlignmentRow(row), String(row)).toBe(false)
     }
+  })
+})
+
+describe('in-cell bar gauges', () => {
+  // the real F5 Summary Status table
+  const f5 = [
+    { device: 'STL-L02-R10-ELTM01', cpu: 4.8, mem: 2.4, vs: 48, pools: 71, nodes: 204 },
+    { device: 'STL-L02-R10-ELTM02', cpu: 3.5, mem: 2.3, vs: 48, pools: 71, nodes: 204 },
+    { device: 'STLL02R06-NLTM01', cpu: 17.1, mem: 4.0, vs: 227, pools: 305, nodes: 623 },
+    { device: 'STL-L02-R10-NGTM01', cpu: 6.1, mem: 2.3, vs: 159, pools: 229, nodes: 261 },
+    { device: 'STL-L02-R05-ADC-03', cpu: 25.9, mem: 4.0, vs: 38, pools: 38, nodes: 173 },
+    { device: 'STL-L02-R10-NGTM02', cpu: 9.5, mem: 12.3, vs: 159, pools: 229, nodes: 261 },
+    { device: 'STL-L02-R05-ADC-04', cpu: 9.3, mem: 4.8, vs: 38, pools: 38, nodes: 174 },
+    { device: 'STLL02R06-NLTM02', cpu: 10.8, mem: 5.0, vs: 227, pools: 305, nodes: 623 },
+  ]
+
+  describe('barColumnSet', () => {
+    it('accepts an array', () => {
+      expect([...barColumnSet(['cpu', 'mem'])]).toEqual(['cpu', 'mem'])
+    })
+
+    it('accepts a comma separated string, trimming spaces', () => {
+      expect([...barColumnSet('cpu , mem')]).toEqual(['cpu', 'mem'])
+    })
+
+    it('is empty when nothing is configured', () => {
+      expect(barColumnSet(undefined).size).toBe(0)
+      expect(barColumnSet('').size).toBe(0)
+      expect(barColumnSet(null).size).toBe(0)
+    })
+
+    it('drops blank entries from a trailing comma', () => {
+      expect([...barColumnSet('cpu, ,')]).toEqual(['cpu'])
+    })
+  })
+
+  describe('barMaxFor', () => {
+    it('uses 0-100 for a column that reads as percentages', () => {
+      // every F5 is idle; without this they would all show a full bar
+      expect(barMaxFor(f5, 'cpu')).toBe(100)
+      expect(barMaxFor(f5, 'mem')).toBe(100)
+    })
+
+    it('scales an unbounded column to its busiest row', () => {
+      expect(barMaxFor(f5, 'vs')).toBe(227)
+      expect(barMaxFor(f5, 'pools')).toBe(305)
+      expect(barMaxFor(f5, 'nodes')).toBe(623)
+    })
+
+    it('lets an explicit max override both', () => {
+      expect(barMaxFor(f5, 'cpu', 50)).toBe(50)
+      expect(barMaxFor(f5, 'nodes', 1000)).toBe(1000)
+      expect(barMaxFor(f5, 'cpu', '80')).toBe(80)
+    })
+
+    it('returns 0 when the column has no numbers to scale', () => {
+      expect(barMaxFor(f5, 'device')).toBe(0)
+      expect(barMaxFor([], 'cpu')).toBe(0)
+    })
+
+    it('does not snap to 100 when a value is negative', () => {
+      // a delta column can go below zero; 100 would be the wrong ceiling
+      expect(barMaxFor([{ d: -20 }, { d: 40 }], 'd')).toBe(40)
+    })
+
+    it('ignores blanks when working out the ceiling', () => {
+      expect(barMaxFor([{ n: 300 }, { n: null }, { n: '' }], 'n')).toBe(300)
+    })
+  })
+
+  describe('barFraction', () => {
+    it('is the value over the max', () => {
+      expect(barFraction(25.9, 100)).toBeCloseTo(0.259)
+      expect(barFraction(227, 227)).toBe(1)
+      expect(barFraction(38, 227)).toBeCloseTo(0.1674, 3)
+    })
+
+    it('reads numeric strings', () => {
+      expect(barFraction('4.8', 100)).toBeCloseTo(0.048)
+    })
+
+    it('clamps rather than overflowing the cell', () => {
+      expect(barFraction(150, 100)).toBe(1)
+      expect(barFraction(-10, 100)).toBe(0)
+    })
+
+    it('is null when there is nothing to draw', () => {
+      expect(barFraction(null, 100)).toBeNull()
+      expect(barFraction('ACTIVE', 100)).toBeNull()
+      expect(barFraction('', 100)).toBeNull()
+      expect(barFraction(5, 0)).toBeNull()     // an all-zero column
+      expect(barFraction(5, undefined)).toBeNull()
+    })
+  })
+
+  it('keeps idle devices visibly idle and busy ones visibly busy', () => {
+    const max = barMaxFor(f5, 'cpu')
+    const widths = f5.map((r) => Math.round(barFraction(r.cpu, max) * 100))
+    expect(widths).toEqual([5, 4, 17, 6, 26, 10, 9, 11])
+  })
+
+  it('ranks the node counts the way the eye should read them', () => {
+    const max = barMaxFor(f5, 'nodes')
+    const widths = f5.map((r) => barFraction(r.nodes, max))
+    expect(Math.max(...widths)).toBe(1)                    // NLTM01/02 are fullest
+    expect(widths[4]).toBeLessThan(widths[3])              // ADC-03 173 < NGTM01 261
+  })
+})
+
+describe('per-column number formatting', () => {
+  // straight from sysStatMemoryUsed / sysStatMemoryTotal * 100
+  const raw = 2.385722420266237
+
+  it('rounds to the decimals asked for', () => {
+    expect(formatCell(raw, { decimals: 1 })).toBe('2.4')
+    expect(formatCell(raw, { decimals: 0 })).toBe('2')
+    expect(formatCell(raw, { decimals: 2 })).toBe('2.39')
+  })
+
+  it('appends a unit', () => {
+    expect(formatCell(raw, { decimals: 1, unit: '%' })).toBe('2.4%')
+  })
+
+  it('pads to a fixed width so a column lines up', () => {
+    expect(formatCell(4, { decimals: 1, unit: '%' })).toBe('4.0%')
+    expect(formatCell(12.258114721528337, { decimals: 1, unit: '%' })).toBe('12.3%')
+  })
+
+  it('leaves text alone', () => {
+    expect(formatCell('ACTIVE', { decimals: 1, unit: '%' })).toBe('ACTIVE')
+  })
+
+  it('shows a blank rather than "null"', () => {
+    expect(formatCell(null, { decimals: 1 })).toBe('')
+    expect(formatCell(undefined, { decimals: 1 })).toBe('')
+  })
+
+  it('passes the value through with no spec', () => {
+    expect(formatCell(raw, null)).toBe(String(raw))
+  })
+
+  describe('formatSpecFor', () => {
+    const specs = [{ column: 'Memory', decimals: 1, unit: '%' },
+                   { column: 'CPU', decimals: 0, unit: '%' }]
+
+    it('finds the spec for a column', () => {
+      expect(formatSpecFor(specs, 'Memory').decimals).toBe(1)
+    })
+
+    it('is null for a column with no spec', () => {
+      expect(formatSpecFor(specs, 'Failover')).toBeNull()
+      expect(formatSpecFor(undefined, 'Memory')).toBeNull()
+    })
+  })
+
+  it('formats the F5 memory column the way it should read', () => {
+    const memory = [2.385722420266237, 2.3414266769942738, 4.031406950155735,
+                    2.3448519630171387, 4.043527792323685, 12.258114721528337,
+                    4.765855759840745]
+    expect(memory.map((v) => formatCell(v, { decimals: 1, unit: '%' })))
+      .toEqual(['2.4%', '2.3%', '4.0%', '2.3%', '4.0%', '12.3%', '4.8%'])
   })
 })

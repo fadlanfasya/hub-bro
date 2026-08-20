@@ -1,13 +1,22 @@
 """REST API connector.
 
 config: {url, method?, headers?, body?, verify_ssl?}
+  - method: GET (default), POST, PUT, PATCH. Some APIs take their query in the
+    body, which needs POST — Elasticsearch, GraphQL, most DQL-style endpoints.
+  - body: JSON sent with the request. Not encrypted at rest, so put credentials
+    in headers, never here.
+  - verify_ssl: optional override; by default private hosts skip verification
+    and public ones do not (see tls.py).
 options: {data_path?, rename?}
   - data_path: dot-path to the array of records, e.g. "data.items". Empty = root.
   - rename: {"old_key": "New label"} applied to columns after normalization.
 """
+import json as jsonlib
+
 import httpx
 
 from ..config import settings
+from .tls import verify_for
 
 
 def _resolve_path(data, path: str):
@@ -55,11 +64,24 @@ async def fetch(config: dict, options: dict) -> dict:
     method = (config.get("method") or "GET").upper()
     headers = config.get("headers") or {}
 
-    verify = config.get("verify_ssl", True)
+    # The form stores the body as text so it can hold any JSON. Parsing it here
+    # rather than at save time means a body that was valid when saved still
+    # fails loudly if it gets corrupted, instead of being sent as a string.
+    body = config.get("body")
+    if isinstance(body, str):
+        body = body.strip()
+        if not body:
+            body = None
+        else:
+            try:
+                body = jsonlib.loads(body)
+            except ValueError as e:
+                raise ValueError(f"The request body is not valid JSON: {e}")
 
     async with httpx.AsyncClient(timeout=settings.FETCH_TIMEOUT_SECONDS,
-                                 follow_redirects=True, verify=verify) as client:
-        resp = await client.request(method, url, headers=headers, json=config.get("body"))
+                                 follow_redirects=True,
+                                 verify=verify_for(url, config)) as client:
+        resp = await client.request(method, url, headers=headers, json=body)
         resp.raise_for_status()
         data = resp.json()
 

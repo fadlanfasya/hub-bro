@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hub-Bro — one place for the dashboards you actually check</title>
+<meta name="description" content="Self-hosted dashboards over REST APIs, Prometheus, SQL, GLPI and CSV. Build a widget, share a link, get a report on WhatsApp at 08:00.">
+<link rel="icon" href="logo.svg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="index.html">
+      <img src="logo.svg" width="24" height="24" alt="">
+      Hub-Bro
+    </a>
+    <nav>
+      <a href="#what">About</a>
+      <a href="#sources">Connectors</a>
+      <a href="docs.html">Docs</a>
+      <a href="https://hub.docker.com/r/fadlanfasya/hub-bro">Docker Hub</a>
+    </nav>
+  </div>
+</header>
+
+<div class="hero">
+  <div class="wrap">
+    <span class="eyebrow">Self-hosted · MIT · single container</span>
+    <h1>One place for the dashboards<br>you actually check.</h1>
+    <p class="lead">
+      Hub-Bro pulls numbers from the systems you already run — Prometheus, GLPI,
+      a REST API, a SQL database, a CSV someone emailed you — and puts them on
+      one screen. It runs on your own server, in one container, with your data
+      staying where it is.
+    </p>
+    <div class="btns">
+      <a class="btn primary" href="docs.html">Read the docs</a>
+      <a class="btn ghost" href="docs.html#deploy">Deploy in five minutes</a>
+    </div>
+  </div>
+</div>
+
+<section id="what">
+  <div class="wrap">
+    <h2>What it is for</h2>
+    <p class="sub">
+      Most teams already have monitoring. What they don't have is one screen that
+      answers "is anything wrong right now?" without opening six tabs.
+    </p>
+    <div class="grid">
+      <div class="card">
+        <span class="tag">mix sources</span>
+        <h3>Numbers from different places, side by side</h3>
+        <p>
+          Ticket counts from GLPI next to firewall CPU from Prometheus. Each
+          widget picks its own source, so one dashboard can span systems that
+          have nothing to do with each other.
+        </p>
+      </div>
+      <div class="card">
+        <span class="tag">share</span>
+        <h3>A link for people without accounts</h3>
+        <p>
+          Read-only share links, plus a kiosk mode that drops all the chrome and
+          refreshes itself — made for the screen on the wall.
+        </p>
+      </div>
+      <div class="card">
+        <span class="tag">tell me</span>
+        <h3>Alerts that stay quiet, reports that don't</h3>
+        <p>
+          An alert speaks only when the state changes. A report arrives at 08:00
+          whether the news is good or bad — so its silence means something too.
+        </p>
+      </div>
+      <div class="card">
+        <span class="tag">yours</span>
+        <h3>Your server, your data</h3>
+        <p>
+          One container, one SQLite file, no external service. Credentials are
+          encrypted at rest and never shown again after you save them.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="sources">
+  <div class="wrap">
+    <h2>Connectors</h2>
+    <p class="sub">Each one exists because something real needed it, not to fill a grid.</p>
+    <div class="grid">
+      <div class="card">
+        <h3>Prometheus</h3>
+        <p>
+          Instant and range PromQL. Labels arrive as their own columns, so you
+          can filter, group, and join several queries into one table — the thing
+          PromQL itself cannot do.
+        </p>
+      </div>
+      <div class="card">
+        <h3>GLPI</h3>
+        <p>
+          Sessions and pagination handled for you, filters pushed down to the
+          server, and date maths for contract and licence expiry.
+        </p>
+      </div>
+      <div class="card">
+        <h3>SQL</h3>
+        <p>
+          PostgreSQL, MySQL, MariaDB, SQLite, Doris and StarRocks. One
+          <code>SELECT</code> per widget, read-only, enforced server-side.
+        </p>
+      </div>
+      <div class="card">
+        <h3>REST API</h3>
+        <p>
+          Any JSON endpoint. GET or POST with a body, custom headers, and a
+          dot-path to the array inside the response.
+        </p>
+      </div>
+      <div class="card">
+        <h3>TrueWatch / Guance</h3>
+        <p>DQL and PromQL against the Open API, flattened into rows.</p>
+      </div>
+      <div class="card">
+        <h3>CSV</h3>
+        <p>Upload a file and chart it. Sometimes that is the whole requirement.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="widgets">
+  <div class="wrap">
+    <h2>What you can build</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>Seven widget types</h3>
+        <p>
+          Line, bar, pie, stat, gauge, table, and markdown text. A stat can carry
+          supporting numbers, a trend, and thresholds that colour it.
+        </p>
+      </div>
+      <div class="card">
+        <h3>Tables that earn their space</h3>
+        <p>
+          Sort on click, search in place, colour cells by value, and draw a bar
+          behind a number so a busy row is visible without reading it.
+        </p>
+      </div>
+      <div class="card">
+        <h3>Cross-filtering</h3>
+        <p>
+          Click a slice, a bar, or a row and the whole dashboard narrows to it.
+          Click again to let go.
+        </p>
+      </div>
+      <div class="card">
+        <h3>History you can go back to</h3>
+        <p>
+          Every distinct layout is kept and restorable, and a second editor gets
+          a warning instead of quietly overwriting your work.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="honest">
+  <div class="wrap">
+    <h2>What it is not</h2>
+    <p class="sub">
+      Worth knowing before you install it, rather than after.
+    </p>
+    <div class="grid">
+      <div class="card">
+        <h3>Not a replacement for Grafana</h3>
+        <p>
+          Grafana has more panel types, more data sources, and a far bigger
+          plugin ecosystem. Hub-Bro is smaller on purpose: fewer choices, less to
+          learn, and connectors shaped around systems Grafana treats as
+          afterthoughts — GLPI in particular.
+        </p>
+      </div>
+      <div class="card">
+        <h3>Not a time-series database</h3>
+        <p>
+          It stores no metrics. It queries what you already have, caches the
+          answer briefly, and draws it. If your source is down, so is the widget
+          — and it says so rather than showing a stale number silently.
+        </p>
+      </div>
+      <div class="card">
+        <h3>Not multi-tenant</h3>
+        <p>
+          One workspace, three roles. Dashboards and sources can be private or
+          shared with named people, but there is no notion of separate
+          organisations inside one install.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer class="site">
+  <div class="wrap">
+    <img src="logo.svg" width="20" height="20" alt="">
+    <span>Hub-Bro</span>
+    <span class="spacer"></span>
+    <a href="docs.html">Docs</a>
+    <a href="docs.html#deploy">Deploy</a>
+    <a href="https://hub.docker.com/r/fadlanfasya/hub-bro">Docker Hub</a>
+  </div>
+</footer>
+
+</body>
+</html>

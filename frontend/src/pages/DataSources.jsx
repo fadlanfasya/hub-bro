@@ -37,7 +37,9 @@ export default function DataSources() {
   const [url, setUrl] = useState('')
   const [headerRows, setHeaderRows] = useState([{ key: '', value: '' }])
   const [baseUrl, setBaseUrl] = useState('')
-  const [verifySsl, setVerifySsl] = useState(true)
+  const [promUser, setPromUser] = useState('')
+  const [method, setMethod] = useState('GET')
+  const [body, setBody] = useState('')
   const [sql, setSql] = useState({ driver: 'postgresql', host: '', port: '', database: '', user: '' })
   // secrets: null means "untouched, keep whatever is stored"; a string is a new value
   const [secrets, setSecrets] = useState({ password: '', app_token: '', user_token: '', api_key: '' })
@@ -63,7 +65,8 @@ export default function DataSources() {
   const resetForm = () => {
     setEditingId(null)
     setName(''); setUrl(''); setHeaderRows([{ key: '', value: '' }])
-    setBaseUrl(''); setFile(null); setVerifySsl(true); setError('')
+    setBaseUrl(''); setPromUser(''); setFile(null); setError('')
+    setMethod('GET'); setBody('')
     setSql({ driver: 'postgresql', host: '', port: '', database: '', user: '' })
     setSecrets({ password: '', app_token: '', user_token: '', api_key: '' })
     setStored({})
@@ -79,12 +82,14 @@ export default function DataSources() {
     setName(ds.name)
     setUrl(ds.config.url || '')
     setBaseUrl(ds.config.base_url || ds.config.endpoint || '')
+    setPromUser(ds.config.username || '')
     setWorkspaceUuids(
       Array.isArray(ds.config.workspace_uuids)
         ? ds.config.workspace_uuids.join(', ')
         : (ds.config.workspace_uuids || ''),
     )
-    setVerifySsl(ds.config.verify_ssl !== false)
+    setMethod(ds.config.method || 'GET')
+    setBody(ds.config.body || '')
     setSql({
       driver: ds.config.driver || 'postgresql',
       host: ds.config.host || '', port: ds.config.port || '',
@@ -119,16 +124,20 @@ export default function DataSources() {
       for (const row of headerRows) {
         if (row.key.trim()) parsedHeaders[row.key.trim()] = row.value
       }
-      return { url, headers: parsedHeaders, verify_ssl: verifySsl, monitor }
+      return { url, method, body: body.trim() || undefined,
+               headers: parsedHeaders, monitor }
     }
-    if (type === 'prometheus') return { base_url: baseUrl, monitor }
+    if (type === 'prometheus') {
+      return { base_url: baseUrl, username: promUser,
+               password: secretValue('password'), monitor }
+    }
     if (type === 'glpi') {
       return {
         base_url: baseUrl,
         app_token: secretValue('app_token'),
         user_token: secretValue('user_token'),
         tokens_in_query: tokensInQuery,
-        verify_ssl: verifySsl, monitor,
+        monitor,
       }
     }
     if (type === 'truewatch') {
@@ -136,7 +145,7 @@ export default function DataSources() {
         endpoint: baseUrl || TRUEWATCH_DEFAULT_ENDPOINT,
         api_key: secretValue('api_key'),
         workspace_uuids: workspaceUuids,
-        verify_ssl: verifySsl, monitor,
+        monitor,
       }
     }
     if (type === 'sql') return { ...sql, password: secretValue('password'), monitor }
@@ -238,11 +247,28 @@ export default function DataSources() {
                 onClick={() => setHeaderRows((rows) => [...rows, { key: '', value: '' }])}>
                 <Plus size={13} /> Add header
               </button>
-              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer' }}>
-                <input type="checkbox" style={{ width: 'auto', marginTop: 2 }} checked={verifySsl}
-                  onChange={(e) => setVerifySsl(e.target.checked)} />
-                <span>Verify SSL certificate <span className="optional">— uncheck for self-signed servers</span></span>
-              </label>
+
+              <label style={{ marginTop: 14 }}>Method</label>
+              <select value={method} onChange={(e) => setMethod(e.target.value)}>
+                <option value="GET">GET</option>
+                <option value="POST">POST</option>
+                <option value="PUT">PUT</option>
+                <option value="PATCH">PATCH</option>
+              </select>
+
+              {method !== 'GET' && (
+                <>
+                  <label>Request body <span className="optional">— JSON</span></label>
+                  <textarea rows={5} value={body} onChange={(e) => setBody(e.target.value)}
+                    style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 12 }}
+                    placeholder={'{\n  "query": { "match_all": {} },\n  "size": 100\n}'} />
+                  <p className="hint">
+                    Sent as JSON. Use this for APIs that take their query in the body —
+                    Elasticsearch, GraphQL, and most report endpoints.
+                    <strong> Not encrypted</strong>, so keep credentials in headers.
+                  </p>
+                </>
+              )}
             </>
           )}
           {type === 'prometheus' && (
@@ -250,6 +276,17 @@ export default function DataSources() {
               <label>Base URL</label>
               <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} required
                 placeholder="http://localhost:9090" />
+              <p className="hint">
+                Include the path prefix if Prometheus sits behind a proxy, e.g.
+                https://10.1.6.60/prometheus — <code>/api/v1/query</code> is added to it.
+              </p>
+              <label>Username</label>
+              <input value={promUser} onChange={(e) => setPromUser(e.target.value)}
+                autoComplete="off" placeholder="Leave blank if there is no login" />
+              <SecretField label="Password"
+                value={secrets.password} hasStored={stored.password}
+                onChange={(v) => setSecret('password', v)}
+                hint="Only needed if a proxy in front of Prometheus asks for one." />
             </>
           )}
           {type === 'glpi' && (
@@ -282,11 +319,6 @@ export default function DataSources() {
                   GLPI server&apos;s access log, so only use it if headers don&apos;t work.
                 </p>
               )}
-              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer' }}>
-                <input type="checkbox" style={{ width: 'auto', marginTop: 2 }} checked={verifySsl}
-                  onChange={(e) => setVerifySsl(e.target.checked)} />
-                <span>Verify SSL certificate <span className="optional">— uncheck for self-signed servers</span></span>
-              </label>
             </>
           )}
           {type === 'truewatch' && (
@@ -310,11 +342,6 @@ export default function DataSources() {
                 Only for querying across workspaces you have been granted. Leave blank
                 for the key&apos;s own workspace.
               </p>
-              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer' }}>
-                <input type="checkbox" style={{ width: 'auto', marginTop: 2 }} checked={verifySsl}
-                  onChange={(e) => setVerifySsl(e.target.checked)} />
-                <span>Verify SSL certificate <span className="optional">— uncheck for self-signed servers</span></span>
-              </label>
             </>
           )}
           {type === 'sql' && (
@@ -491,7 +518,7 @@ export default function DataSources() {
 
       {sharing && (
         <div className="modal-overlay" onClick={() => setSharing(null)}>
-          <div className="card modal" onClick={(e) => e.stopPropagation()}>
+          <div className="card modal narrow" onClick={(e) => e.stopPropagation()}>
             <div className="page-header" style={{ marginBottom: 14 }}>
               <h3 style={{ margin: 0 }}>Share “{sharing.name}”</h3>
               <span className="spacer" />

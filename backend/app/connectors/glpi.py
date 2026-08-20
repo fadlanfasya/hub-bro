@@ -28,6 +28,7 @@ import time
 import httpx
 
 from ..config import settings
+from .tls import verify_for
 from .rest_api import normalize
 
 # session_token cache: {(base_url, app_token, user_token): (token, created_at)}
@@ -55,7 +56,7 @@ FILTER_PUSHDOWN = {
 def _client(config: dict) -> httpx.AsyncClient:
     return httpx.AsyncClient(
         timeout=settings.FETCH_TIMEOUT_SECONDS,
-        verify=config.get("verify_ssl", True),
+        verify=verify_for(config.get("base_url") or "", config),
         follow_redirects=True,
     )
 

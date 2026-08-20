@@ -691,6 +691,58 @@ table.data td.tone-muted { color: var(--muted); }
 :root[data-theme='dark'] table.data td.tone-blue { color: #93c5fd; background: rgba(147, 197, 253, .14); }
 :root[data-theme='dark'] table.data td.tone-purple { color: #c4b5fd; background: rgba(196, 181, 253, .14); }
 
+/* in-cell bar gauges — the fill sits behind the number rather than beside it,
+   so turning bars on never costs the table a column of width */
+table.data .cell-bar {
+  position: relative;
+  display: block;
+  min-width: 46px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+table.data .cell-bar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--primary);
+  opacity: .28;
+  border-radius: 4px;
+}
+table.data .cell-bar-text { position: relative; }
+/* a coloured cell already carries the meaning; let the bar echo its tone */
+table.data .cell-bar-fill.tone-good { background: var(--success); }
+table.data .cell-bar-fill.tone-bad { background: var(--danger); }
+table.data .cell-bar-fill.tone-warn,
+table.data .cell-bar-fill.tone-yellow { background: var(--accent); }
+table.data .cell-bar-fill.tone-orange { background: #fb923c; }
+table.data .cell-bar-fill.tone-blue { background: #60a5fa; }
+table.data .cell-bar-fill.tone-purple { background: #a78bfa; }
+table.data .cell-bar-fill.tone-muted { background: var(--muted); }
+
+/* ---- dashboard folders ---- */
+.folder-group + .folder-group { margin-top: var(--space-6); }
+.folder-heading {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 13px; font-weight: 600; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .04em;
+  margin: 0 0 var(--space-3);
+}
+.folder-count {
+  font-weight: 500; font-size: 11.5px; letter-spacing: 0;
+  background: var(--surface-2); color: var(--muted);
+  padding: 1px 7px; border-radius: 999px;
+}
+.dashboard-card .pinned { color: var(--accent); }
+.dashboard-card .pinned svg { fill: currentColor; }
+
+/* the dashboard you drilled down from, next to the back arrow */
+.crumb {
+  font-size: 12.5px; color: var(--muted); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; max-width: 220px;
+}
+.crumb::after { content: '/'; margin-left: 7px; opacity: .5; }
+
 /* ---- text / markdown widget ---- */
 /* everything below sizes in em, so the font-size set on .markdown scales
    headings, code and spacing together */
@@ -801,9 +853,31 @@ button.status-pill.error { border: 0; cursor: pointer; }
   animation: overlay-in .18s var(--ease-out);
 }
 .modal {
-  width: 520px; max-height: 86vh; overflow: auto; z-index: var(--z-modal);
+  /* Wide enough for the multi-field rows in the widget editor (a date column
+     has six inputs), and still comfortable on a laptop screen. */
+  width: min(720px, 94vw); max-height: 86vh; overflow: auto; z-index: var(--z-modal);
   padding: 24px; box-shadow: var(--shadow-md);
   animation: modal-in .22s var(--ease-out);
+}
+.modal.narrow { width: min(520px, 94vw); }
+
+/* A row of related inputs, each with its own small caption. Without the
+   captions a six-box row is unreadable — you cannot tell which one is the
+   output name and which is the duration. */
+.field-grid {
+  display: grid; gap: 8px; align-items: end;
+  padding: 10px; margin-bottom: 8px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.field-grid .cap {
+  display: block; font-size: 11px; color: var(--muted);
+  margin-bottom: 3px; white-space: nowrap;
+}
+.field-grid input, .field-grid select { width: 100%; }
+.field-grid .remove { align-self: end; margin-bottom: 1px; }
+@media (max-width: 760px) {
+  .field-grid { grid-template-columns: 1fr 1fr !important; }
 }
 .modal h3 { margin: 0 0 var(--space-2); font-size: 17px; }
 

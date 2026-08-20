@@ -71,6 +71,28 @@ def parse_date(value) -> datetime | None:
 _UNIT_SECONDS = {"days": 86400.0, "hours": 3600.0, "minutes": 60.0}
 
 
+def add_months(when: datetime, months) -> datetime | None:
+    """Shift a date by N whole months, clamping the day to the target month.
+
+    31 January + 1 month is 28 February, not 3 March. Contracts renew on a
+    month boundary, so calendar months are the honest unit — adding 30-day
+    blocks would drift a day or two every year.
+    """
+    n = _num(months)
+    if n is None:
+        return None
+    n = int(n)
+    total = when.month - 1 + n
+    year = when.year + total // 12
+    month = total % 12 + 1
+    # last day of the target month
+    if month == 12:
+        last = 31
+    else:
+        last = (datetime(year, month + 1, 1) - datetime(year, month, 1)).days
+    return when.replace(year=year, month=month, day=min(when.day, last))
+
+
 def _is_date_only(value) -> bool:
     """True for "2025-10-16" but not "2024-10-23 02:31:42"."""
     if isinstance(value, datetime):
@@ -112,12 +134,39 @@ def apply_date_diff(rows: list, columns: list, specs, now: datetime | None = Non
         future_positive = (spec.get("direction") or "until").lower() != "since"
         decimals = spec.get("decimals")
 
+        # GLPI contracts have no end date: they store a start plus a duration in
+        # months. `plus_months` names the column (or a fixed number) holding
+        # that duration, so the end date can be derived instead of stored.
+        plus_months = spec.get("plus_months")
+        label_target = spec.get("label_as")
+        label_format = spec.get("label_format") or "%Y-%m"
+
         for row in rows:
             raw = row.get(source)
             parsed = parse_date(raw)
             if parsed is None:
                 row[target] = None
+                if label_target:
+                    row[label_target] = None
                 continue
+
+            if plus_months not in (None, ""):
+                months = row.get(plus_months, plus_months)
+                shifted = add_months(parsed, months)
+                if shifted is None:
+                    # a contract with no duration has no end date; leaving it
+                    # blank is right, guessing zero months is not
+                    row[target] = None
+                    if label_target:
+                        row[label_target] = None
+                    continue
+                parsed = shifted
+
+            # Optional: emit the resolved date as a label too, so the same spec
+            # can feed both a threshold (the number) and a grouped chart (the
+            # month). Deriving both from one computed date keeps them agreeing.
+            if label_target:
+                row[label_target] = parsed.strftime(label_format)
 
             if unit == "days" and not decimals and _is_date_only(raw):
                 # A date with no time means calendar days, which is how people
@@ -133,8 +182,71 @@ def apply_date_diff(rows: list, columns: list, specs, now: datetime | None = Non
 
         if target not in columns:
             columns.append(target)
+        if label_target and label_target not in columns:
+            columns.append(label_target)
 
     return rows, columns
+
+
+def apply_count_by(rows: list, columns: list, spec: dict):
+    """Collapse rows into ONE row holding a count per bucket.
+
+        {"column": "days_left", "buckets": [
+            {"as": "expired",  "max": -1},
+            {"as": "soon",     "min": 0, "max": 60},
+            {"as": "healthy",  "min": 61}]}
+
+      -> columns ["expired", "soon", "healthy"], one row {85, 25, 82}
+
+    A stat widget shows one number and can only apply one filter, so "85
+    expired, 25 expiring, 82 healthy" is impossible as three filtered widgets
+    in one tile. Turning the buckets into columns of a single row lets the
+    headline read one of them and the supporting line read the rest — all from
+    a single fetch, so the numbers cannot disagree.
+
+    Bounds are inclusive. Rows whose value is missing or non-numeric are
+    counted in `unknown` when a bucket asks for it, and otherwise ignored —
+    a contract with no dates is not "expired".
+    """
+    if not spec or not spec.get("column"):
+        return rows, columns
+    source = spec["column"]
+    buckets = spec.get("buckets") or []
+    if not buckets:
+        return rows, columns
+
+    out: dict = {}
+    names = []
+    for b in buckets:
+        name = b.get("as") or "bucket"
+        out[name] = 0
+        names.append(name)
+
+    unknown_name = spec.get("unknown_as")
+    if unknown_name:
+        out[unknown_name] = 0
+        names.append(unknown_name)
+
+    for row in rows:
+        value = _num(row.get(source))
+        if value is None:
+            if unknown_name:
+                out[unknown_name] += 1
+            continue
+        for b in buckets:
+            lo, hi = _num(b.get("min")), _num(b.get("max"))
+            if lo is not None and value < lo:
+                continue
+            if hi is not None and value > hi:
+                continue
+            out[b.get("as") or "bucket"] += 1
+            break          # first matching bucket wins, so totals never double count
+
+    if spec.get("total_as"):
+        out[spec["total_as"]] = len(rows)
+        names.append(spec["total_as"])
+
+    return [out], names
 
 
 def _num(value) -> float | None:
@@ -224,6 +336,85 @@ def apply_unpivot(rows: list, columns: list, spec: dict) -> tuple[list, list]:
     return out, keep + [name_col, value_col]
 
 
+def join_results(parts: list, spec: dict) -> dict:
+    """Merge several result sets into one table on a shared key column.
+
+    Prometheus cannot return a table. One query gives one number per series, so
+    a row like "device | cpu | memory | failover" is several queries stitched
+    together on a key both of them carry — usually `instance` or `sysName`.
+
+    `parts` is [{"as": "CPU", "result": {columns, rows}}, ...]. The join is a
+    full outer join keyed on `spec["on"]`: a device that answers one query but
+    not another still gets a row, with a blank in the column it missed. An
+    inner join would silently hide exactly the device you need to look at —
+    the one that stopped reporting.
+    """
+    on = spec.get("on")
+    if not on:
+        raise ValueError("A join needs a column to join on")
+
+    carry = [c for c in (spec.get("carry") or []) if c]
+    rows_by_key: dict = {}
+    order: list = []
+    skipped = 0
+    collisions = 0
+    labels: list[str] = []
+
+    for part in parts:
+        label = part.get("as") or "value"
+        result = part.get("result") or {}
+        columns = list(result.get("columns") or [])
+
+        # the value is whichever column the query produced last — `value` for
+        # Prometheus, but a SQL query may call it anything
+        value_column = part.get("value_column") or spec.get("value_column")
+        if not value_column:
+            value_column = next(
+                (c for c in reversed(columns) if c not in (on, "time", "series")), None)
+
+        if label in labels:
+            label = f"{label} ({len(labels) + 1})"
+        labels.append(label)
+
+        seen_this_part = set()
+        for row in result.get("rows") or []:
+            key = row.get(on)
+            if key in (None, ""):
+                skipped += 1
+                continue
+            key = str(key)
+            if key not in rows_by_key:
+                rows_by_key[key] = {on: row.get(on)}
+                order.append(key)
+                for c in carry:
+                    if c in row:
+                        rows_by_key[key][c] = row.get(c)
+            elif key in seen_this_part:
+                # two series with the same key in one query — the first wins,
+                # because overwriting would make the table depend on scrape order
+                collisions += 1
+                continue
+            seen_this_part.add(key)
+            for c in carry:
+                rows_by_key[key].setdefault(c, row.get(c))
+            rows_by_key[key][label] = row.get(value_column) if value_column else None
+
+    rows = [rows_by_key[k] for k in order]
+    for row in rows:                       # keep every row the same shape
+        for label in labels:
+            row.setdefault(label, None)
+
+    out = {"columns": [on, *carry, *labels], "rows": rows}
+    meta = {}
+    if skipped:
+        meta["rows_without_key"] = skipped
+    if collisions:
+        meta["duplicate_keys"] = collisions
+    if meta:
+        out["meta"] = meta
+    return out
+
+
 def apply_transforms(result: dict, options: dict) -> dict:
     """Return a new {columns, rows} with the widget's shaping applied."""
     rows = list(result.get("rows") or [])
@@ -254,6 +445,13 @@ def apply_transforms(result: dict, options: dict) -> dict:
         if not column or column not in columns:
             continue
         rows = [r for r in rows if _matches(r, f)]
+
+    # 1c. bucket counts — after filtering, before grouping, because it replaces
+    # the rows entirely with a single summary row
+    count_by = options.get("count_by")
+    if count_by:
+        rows, columns = apply_count_by(rows, columns, count_by)
+        return {"columns": columns, "rows": rows}
 
     # 2. group + aggregate
     group_by = options.get("group_by")

@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   LayoutDashboard, Plus, Trash2, ArrowRight, Copy, Share2, Lock, Users, X,
+  Star, FolderInput, Folder,
 } from 'lucide-react'
 import { dashboards } from '../api'
 import { useAuth } from '../useAuth'
 import EditableTitle from '../components/EditableTitle'
 import SharePanel from '../components/SharePanel'
+import { UNFILED, folderNames, groupByFolder } from '../dashboardList'
 
 export default function Dashboards() {
   const { can, user } = useAuth()
@@ -16,6 +18,11 @@ export default function Dashboards() {
   const [error, setError] = useState('')
   const [sharing, setSharing] = useState(null)
   const [newVisibility, setNewVisibility] = useState('workspace')
+  const [moving, setMoving] = useState(null)      // dashboard being filed
+  const [folderDraft, setFolderDraft] = useState('')
+
+  const groups = groupByFolder(items)
+  const existingFolders = folderNames(items)
 
   // Only the owner (or an admin) may change who a dashboard is shared with —
   // an invited editor shouldn't be able to widen access behind your back.
@@ -67,6 +74,30 @@ export default function Dashboards() {
     }
   }
 
+  const togglePin = async (d) => {
+    setError('')
+    try {
+      await dashboards.update(d.id, { pinned: !d.pinned })
+      load()
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Could not pin')
+    }
+  }
+
+  const moveToFolder = async (e) => {
+    e.preventDefault()
+    setError('')
+    try {
+      // an empty string is the explicit "take it out of its folder" signal
+      await dashboards.update(moving.id, { folder: folderDraft.trim() })
+      setMoving(null)
+      setFolderDraft('')
+      load()
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Could not move it')
+    }
+  }
+
   const duplicate = async (id) => {
     await dashboards.duplicate(id)
     load()
@@ -113,8 +144,17 @@ export default function Dashboards() {
             : 'No dashboards have been created yet.'}</p>
         </div>
       ) : (
-        <div className="grid-cards">
-          {items.map((d) => (
+        groups.map((group) => (
+          <section key={group.name} className="folder-group">
+            {(groups.length > 1 || group.filed) && (
+              <h2 className="folder-heading">
+                {group.filed ? <Folder size={13} /> : null}
+                {group.name}
+                <span className="folder-count">{group.items.length}</span>
+              </h2>
+            )}
+            <div className="grid-cards">
+          {group.items.map((d) => (
             <div className="card dashboard-card" key={d.id}>
               <h3>
                 {canEdit ? (
@@ -144,6 +184,19 @@ export default function Dashboards() {
                 </Link>
                 {canEdit && (
                   <>
+                    <button
+                      className={d.pinned ? 'secondary small icon pinned' : 'secondary small icon'}
+                      aria-label={d.pinned ? 'Unpin' : 'Pin to the top'}
+                      aria-pressed={Boolean(d.pinned)}
+                      title={d.pinned ? 'Unpin' : 'Pin to the top of its group'}
+                      onClick={() => togglePin(d)}>
+                      <Star size={13} />
+                    </button>
+                    <button className="secondary small icon" aria-label="Move to folder"
+                      title="Move to folder"
+                      onClick={() => { setMoving(d); setFolderDraft(d.folder || '') }}>
+                      <FolderInput size={13} />
+                    </button>
                     {canManage(d) && (
                       <button className="secondary small icon" aria-label="Sharing"
                         title="Who can see this" onClick={() => setSharing(d)}>
@@ -164,12 +217,47 @@ export default function Dashboards() {
               </div>
             </div>
           ))}
+            </div>
+          </section>
+        ))
+      )}
+
+      {moving && (
+        <div className="modal-overlay" onClick={() => setMoving(null)}>
+          <form className="card modal narrow" onClick={(e) => e.stopPropagation()}
+            onSubmit={moveToFolder}>
+            <div className="page-header" style={{ marginBottom: 14 }}>
+              <h3 style={{ margin: 0 }}>Move “{moving.name}”</h3>
+              <span className="spacer" />
+              <button type="button" className="secondary small icon" aria-label="Close"
+                onClick={() => setMoving(null)}>
+                <X size={14} />
+              </button>
+            </div>
+            <label>Folder</label>
+            <input value={folderDraft} autoFocus list="existing-folders"
+              placeholder="Network" maxLength={60}
+              onChange={(e) => setFolderDraft(e.target.value)} />
+            <datalist id="existing-folders">
+              {existingFolders.map((f) => <option key={f} value={f} />)}
+            </datalist>
+            <p className="hint">
+              Type a new name to create a folder, or pick one you already use.
+              Leave it empty to take this dashboard out of its folder.
+            </p>
+            <div className="modal-footer">
+              <button type="button" className="secondary" onClick={() => setMoving(null)}>
+                Cancel
+              </button>
+              <button type="submit">Move</button>
+            </div>
+          </form>
         </div>
       )}
 
       {sharing && (
         <div className="modal-overlay" onClick={() => setSharing(null)}>
-          <div className="card modal" onClick={(e) => e.stopPropagation()}>
+          <div className="card modal narrow" onClick={(e) => e.stopPropagation()}>
             <div className="page-header" style={{ marginBottom: 14 }}>
               <h3 style={{ margin: 0 }}>Share “{sharing.name}”</h3>
               <span className="spacer" />

@@ -17,7 +17,7 @@ os.environ["DATABASE_URL"] = "sqlite://"      # in-memory, nothing touches disk
 from sqlalchemy import create_engine  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 
-from app import access  # noqa: E402
+from app import access, permissions  # noqa: E402
 from app.database import Base  # noqa: E402
 from app.models import (  # noqa: E402
     Dashboard, DashboardMember, DataSource, DataSourceMember, User,
@@ -158,12 +158,18 @@ allowed("and still listed",
 allowed("a NULL-visibility source is still usable",
         access.can_use_datasource(db, bob, legacy_db))
 
-print("only admins can publish a source to everyone")
+print("only admins manage sources")
 denied("an editor cannot create a workspace-wide source",
        access.can_create_workspace_datasource(alice))
 allowed("an admin can", access.can_create_workspace_datasource(admin))
-allowed("an editor can still create their own", access.can_create_datasource(alice))
+# The Data sources page is admin-only, so the endpoint behind it is too —
+# otherwise closing the screen would leave the door beside it open.
+denied("an editor cannot create sources any more", access.can_create_datasource(alice))
+allowed("an admin can create sources", access.can_create_datasource(admin))
 denied("a viewer cannot create sources at all", access.can_create_datasource(vera))
+# but an editor must still be able to build widgets on what already exists
+allowed("an editor can still use a shared source",
+        access.can_use_datasource(db, alice, legacy_db))
 
 print("revoking access takes effect immediately")
 db.delete(db.query(DashboardMember)
@@ -185,3 +191,22 @@ denied("Bob cannot delete a dashboard he does not own",
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
+
+from app.permissions import ADMIN, EDITOR, VIEWER  # noqa: E402
+
+print("the admin-only menus")
+# The nav and the routes behind it are driven by these two capabilities.
+for role, label in ((ADMIN, "admin"), (EDITOR, "editor"), (VIEWER, "viewer")):
+    expected = role == ADMIN
+    (allowed if expected else denied)(
+        f"{label} {'sees' if expected else 'cannot see'} the Data sources page",
+        "datasource.manage" in permissions.capabilities_for(role))
+    (allowed if expected else denied)(
+        f"{label} {'sees' if expected else 'cannot see'} the Health page",
+        "datasource.health" in permissions.capabilities_for(role))
+
+# ...but an editor must keep the one capability the widget builder needs
+allowed("an editor can still list sources for the widget picker",
+        "datasource.view" in permissions.capabilities_for(EDITOR))
+denied("a viewer still cannot list sources",
+       "datasource.view" in permissions.capabilities_for(VIEWER))

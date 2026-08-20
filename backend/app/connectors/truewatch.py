@@ -41,6 +41,7 @@ import time
 import httpx
 
 from ..config import settings
+from .tls import verify_for
 
 DEFAULT_ENDPOINT = "https://openapi.truewatch.com"
 QUERY_PATH = "/api/v1/df/query_data"
@@ -58,7 +59,7 @@ def endpoint_of(config: dict) -> str:
 def client(config: dict) -> httpx.AsyncClient:
     return httpx.AsyncClient(
         timeout=settings.FETCH_TIMEOUT_SECONDS,
-        verify=config.get("verify_ssl", True),
+        verify=verify_for(endpoint_of(config), config),
         follow_redirects=True,
     )
 
