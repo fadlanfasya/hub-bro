@@ -105,9 +105,14 @@ check "unused sources list no dashboards" "$(echo "$H" | jq_ "len(d[3]['dashboar
 echo "permissions"
 curl -s -X POST $B/api/users -H "$A" -H "$JSON" -d '{"email":"v@t.com","password":"secret1234","role":"viewer"}' > /dev/null
 V="Authorization: Bearer $(curl -s -X POST $B/api/auth/login -d 'username=v@t.com&password=secret1234' | jq_ "d['access_token']")"
-check "viewers can see health" "$(code $B/api/datasources/health -H "$V")" "200"
+# Health is admin-only. That is a deliberate trade: someone reading a dashboard
+# can no longer check whether a source is failing, so a stale number looks like
+# a current one. Widgets still show their own fetch errors, which is the part
+# that matters at the point of reading.
+check "viewers cannot see health" "$(code $B/api/datasources/health -H "$V")" "403"
 check "viewers still cannot list sources" "$(code $B/api/datasources -H "$V")" "403"
-check "viewers can trigger a check" "$(code -X POST $B/api/datasources/1/check -H "$V")" "200"
+check "viewers cannot trigger a check" "$(code -X POST $B/api/datasources/1/check -H "$V")" "403"
+check "admins can see health" "$(code $B/api/datasources/health -H "$A")" "200"
 check "health needs a token" "$(code $B/api/datasources/health)" "401"
 
 echo "retention"

@@ -66,11 +66,17 @@ def _check_glpi_url(config: dict):
 def _check_visibility(visibility: str | None, user: User) -> str:
     """Validate the requested visibility for this user.
 
-    An editor may keep a private source of their own, but only an admin can
-    publish one to the whole workspace — otherwise anyone could hand their
-    database credentials to every account in one click.
+    Only an admin can publish one to the whole workspace — otherwise anyone
+    could hand their database credentials to every account in one click.
+
+    Omitting it means workspace, matching dashboards and matching what the form
+    sends. Defaulting to private looked safer and was actively wrong: sources
+    are created by admins so that *editors* can build widgets on them, and a
+    private one is unusable by everyone except the admin who made it.
+    Visibility controls who may query through a source, never who may read its
+    credentials — that stays with the owner and admins either way.
     """
-    visibility = visibility or VISIBILITY_PRIVATE
+    visibility = visibility or VISIBILITY_WORKSPACE
     if visibility not in VISIBILITIES:
         raise HTTPException(status_code=400,
                             detail=f"Visibility must be one of {list(VISIBILITIES)}")

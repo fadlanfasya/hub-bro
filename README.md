@@ -1,21 +1,32 @@
 # Hub-Bro
 
-Unified dashboard platform MVP — connect data from APIs, monitoring tools, and files, and build dashboards in one place.
+One place for the dashboards you actually check. Hub-Bro pulls numbers from the
+systems you already run — Prometheus, GLPI, a REST API, a SQL database, a CSV
+someone emailed you — and puts them on one screen, on your own server, in one
+container.
+
+📖 **[Website and documentation](https://fadlanfasya.github.io/hub-bro/)** ·
+🐳 **[Docker Hub](https://hub.docker.com/r/fadlanfasya/hub-bro)**
 
 ## Features
 
 - Accounts with roles (admin / editor / viewer), created by an admin — see [Users and roles](#users-and-roles)
 - Data source connectors:
-  - **REST API** — any JSON endpoint, custom headers, optional SSL verification
+  - **REST API** — any JSON endpoint, GET or POST with a JSON body, custom headers
   - **CSV upload**
-  - **Prometheus** — instant and range PromQL queries
+  - **Prometheus** — instant and range PromQL; labels become their own columns, and one table widget can join several queries
   - **GLPI** — automatic session handling, pagination, and server-side filter pushdown
-  - **SQL** — PostgreSQL / MySQL / SQLite, one SELECT per widget
+  - **SQL** — PostgreSQL / MySQL / MariaDB / SQLite / Doris / StarRocks, one SELECT per widget
+  - **TrueWatch / Guance** — DQL and PromQL through the Open API
+- TLS verification decided by the address rather than a checkbox: private ranges skip it, public hosts don't
 - Data transforms per widget: filter rows, group by a column, aggregate (count/sum/avg/min/max), sort, limit
+- `date_diff` turns a date into a number of days (with `+ months` for GLPI contracts, which store a start date and a duration)
+- `count_by` collapses rows into one row of named counts, so a single stat can show "8 total, 4 active, 4 standby" from one fetch
 - Drag-and-drop dashboard builder (12-column grid, auto-save). Widgets stay where you drop them, can be locked in place, and have a minimum size so charts stay readable
 - Widget types: line chart, bar chart, pie/donut, stat card, gauge, table, text/markdown
 - Stat widgets can show a trend against another column or the previous row
-- Tables sort on click, filter in place (search box plus per-column value pickers), and support conditional colouring
+- Tables sort on click, filter in place (search box plus per-column value pickers), colour cells by value, draw bars behind numbers, and format decimals and units per column
+- A link can carry `?q=` to open the next page already narrowed to one row
 - Unpivot turns wide `count(*) FILTER (…)` results into chartable rows
 - Per-dashboard themes (preset palettes or a custom accent), with an optional per-widget accent
 - Cross-filtering: click a pie slice, bar, or table row to filter the whole dashboard
@@ -24,7 +35,9 @@ Unified dashboard platform MVP — connect data from APIs, monitoring tools, and
 - Dashboard time range picker (15m → 30d); widgets can follow it or pin their own window
 - Export any widget as CSV or PNG, or the whole dashboard as a PNG
 - Per-widget auto refresh (10s → 15m), with backend response caching so several widgets on one source share a single upstream request
-- Alert thresholds on stat widgets (warn / critical colouring)
+- Alert rules with webhook delivery — Slack, Teams, generic JSON, or a custom body for anything else (a WhatsApp gateway, say). Alerts notify on *change*, with a flap guard and recovery messages
+- Scheduled reports: a message sent at a fixed time in your own timezone, with `{column}` placeholders filled from the query
+- Dashboard folders, pinning, and a back button that returns to the dashboard you drilled down from
 - Read-only share links and a kiosk mode for wall displays
 - Credentials encrypted at rest and masked in API responses
 
@@ -77,15 +90,17 @@ The **first person to open the app registers the admin account**, and self-regis
 | Export data (CSV/PNG) | ✓ | ✓ | ✓ |
 | Create and edit dashboards | ✓ | ✓ | — |
 | Create share links | ✓ | ✓ | — |
-| View data sources | ✓ | ✓ | — |
-| Add and edit data sources | ✓ | — | — |
+| Choose a data source when building a widget | ✓ | ✓ | — |
+| Data sources page, add and edit sources | ✓ | — | — |
+| Source health page | ✓ | — | — |
 | Manage users | ✓ | — | — |
 
 Dashboards and data sources belong to the **workspace**, not to a person: everyone sees the same dashboards, and the role decides who can change them. Deleting a user leaves their dashboards in place.
 
 Notes on the reasoning:
 
-- **Viewers can't see data sources** because a source config exposes internal hostnames and which systems exist, even with credentials masked. They still see the data through dashboards.
+- **Listing sources and opening the Data sources page are separate capabilities.** An editor has to pick a source to build a widget, so they can read the list of names; the page itself shows every connection detail, so it stays with admins. Splitting them is what lets the menu be admin-only without disarming every editor.
+- **Viewers can't see sources at all**, because a config exposes internal hostnames and which systems exist even with credentials masked. They still see the data through dashboards.
 - **Only admins edit data sources**, since a source is shared infrastructure and one bad edit breaks every dashboard using it.
 - **Viewers can't call `/api/data/fetch`.** They load widget data through a widget-scoped endpoint where the query comes from the stored dashboard. Otherwise "read-only" would still let someone run arbitrary SQL against a SQL source.
 - You can't demote, deactivate or delete the last remaining admin, and can't deactivate or delete yourself.
@@ -175,7 +190,9 @@ Two things the container enforces that dev mode doesn't: it **refuses to start**
 
 1. In GLPI: **Setup → General → API** — enable the REST API and create an API client to get an **App-Token**.
 2. **Preferences → Remote access keys** — generate an **API token** for your user.
-3. In Hub-Bro, add a GLPI source with the `apirest.php` URL (e.g. `http://10.1.6.51/glpi/apirest.php`), both tokens, and uncheck SSL verification if the server uses a self-signed certificate.
+3. In Hub-Bro, add a GLPI source with the `apirest.php` URL (e.g. `http://10.1.6.51/glpi/apirest.php`) and both tokens. A self-signed certificate needs no extra step: a private address skips verification automatically.
+
+The URL must end at `apirest.php` — a path after it (`.../apirest.php/Computer`) is rejected, because GLPI then answers `ERROR_SESSION_TOKEN_MISSING` and the real cause is impossible to guess from that message.
 
 Hub-Bro opens the session, reuses it across requests, and re-opens it automatically when it expires. In a widget, set **Item type** (Computer, Ticket, …) and use *Filter & summarize* to chart things like VMs per status:
 
@@ -194,11 +211,19 @@ Viewers can only see that one dashboard, and can only run the queries its widget
 
 ```bash
 cd backend
-bash tests/run_all.sh                 # everything (228 assertions)
+bash tests/run_all.sh                 # everything
 
 python tests/test_transforms.py       # transform unit tests
 python tests/test_security.py         # encryption + SQL query validation
 python tests/test_cache.py            # memory + redis cache backends
+python tests/test_access.py           # the permission rules
+python tests/test_access_http.py      # the same rules through the real routes
+python tests/test_alerting.py         # thresholds, flap guard, recovery
+python tests/test_reports.py          # schedules, timezones, message templates
+python tests/test_reports_e2e.py      # a report from clock to gateway
+python tests/test_join.py             # joining several Prometheus queries
+python tests/test_date_diff.py        # expiry maths and calendar edge cases
+python tests/test_folders.py          # filing dashboards
 bash tests/test_integration.sh        # API, caching, transforms
 bash tests/test_glpi.sh               # pagination, filter pushdown, session recovery
 bash tests/test_sharing.sh            # sharing, duplication, access isolation
@@ -210,7 +235,7 @@ bash tests/test_production.sh         # config guards, SPA serving, persistence
 
 ```bash
 cd frontend
-npm test                              # data shaping, tables, theme, selection, grid (277 tests)
+npm test                              # data shaping, tables, theme, selection, grid
 ```
 
 The GLPI suites run against a mock GLPI server (`tests/mock_glpi.py`) — no real instance needed.
@@ -239,13 +264,21 @@ The cache defaults to an in-process dict, which is why the container runs a sing
 If Redis is configured but unreachable, the app logs a warning and falls back to the in-process cache rather than failing — `GET /api/health` reports which backend is live.
 
 ## Known limits
-- Alert thresholds colour the widget but don't notify anywhere yet.
+
+- Joining several queries into one table works **within a single data source**. A table can't mix Prometheus with SQL.
+- `?q=` filtering happens in the browser, so the server still sends every row before one is shown.
 - There's no rate limiting on login. Fine on a private network; add Cloudflare Access or similar before exposing the app publicly.
 - Version history keeps the last 30 snapshots per dashboard, and collapses saves made by the same person within two minutes.
 - GLPI fetches up to **Max rows** per widget (default 1000). Above that, a widget shows "Showing N of M" and its counts cover only the fetched rows.
 
 ## Next steps
 
-- Webhook/email delivery for threshold alerts
+- Email delivery alongside webhooks
+- A state-timeline widget, for showing how a status changed over a day
 - Refresh tokens; Redis-backed cache for multi-worker deployments
 - Dashboard-level variables (e.g. a location filter applied to every widget)
+
+## Licence
+
+Not yet chosen. Until a `LICENSE` file exists, the usual default applies: the
+source is readable but not licensed for reuse.
