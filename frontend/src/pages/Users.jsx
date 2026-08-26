@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
-  UserPlus, Trash2, KeyRound, ShieldCheck, Check, X, AlertCircle, Users as UsersIcon,
+  UserPlus, Trash2, KeyRound, ShieldCheck, ShieldOff, Check, X, AlertCircle,
+  Users as UsersIcon,
 } from 'lucide-react'
 import { users as usersApi } from '../api'
 import { useAuth } from '../useAuth'
@@ -143,6 +144,19 @@ export default function Users() {
                         onClick={() => { setResetting(u.id); setNewPassword('') }}>
                         <KeyRound size={13} />
                       </button>
+                      {u.totp_enabled && (
+                        <button className="secondary small icon"
+                          title="Turn off two-factor — for someone who lost their phone and recovery codes"
+                          onClick={() => {
+                            if (confirm(`Turn off two-factor for ${u.email}?\n\n`
+                              + 'They will sign in with their password alone until they set it '
+                              + 'up again. Only do this once you are sure who you are talking to.')) {
+                              act(() => usersApi.resetTotp(u.id))
+                            }
+                          }}>
+                          <ShieldOff size={13} />
+                        </button>
+                      )}
                       <button className="secondary small"
                         title={u.is_active ? 'Disable this account' : 'Enable this account'}
                         onClick={() => act(() => usersApi.update(u.id, { is_active: !u.is_active }))}>

@@ -44,6 +44,7 @@ export const users = {
   create: (payload) => api.post('/users', payload),
   update: (id, payload) => api.put(`/users/${id}`, payload),
   remove: (id) => api.delete(`/users/${id}`),
+  resetTotp: (id) => api.post(`/users/${id}/totp/reset`),
 }
 
 export const datasources = {

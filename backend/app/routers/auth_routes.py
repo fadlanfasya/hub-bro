@@ -202,10 +202,8 @@ def totp_setup(payload: TotpStart, user: User = Depends(get_current_user),
     secret = totp_lib.generate_secret()
     user.set_totp_secret(secret)      # stored but not yet in force
     db.commit()
-    return {
-        "secret": secret,
-        "uri": totp_lib.provisioning_uri(secret, user.email),
-    }
+    uri = totp_lib.provisioning_uri(secret, user.email)
+    return {"secret": secret, "uri": uri, "qr_svg": totp_lib.qr_svg(uri)}
 
 
 @router.post("/totp/enable")

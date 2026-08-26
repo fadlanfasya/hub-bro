@@ -128,3 +128,33 @@ def delete_user(user_id: int, admin: User = Depends(require_admin),
     db.delete(user)
     db.commit()
     return {"ok": True}
+
+
+@router.post("/{user_id}/totp/reset")
+def reset_two_factor(user_id: int, admin: User = Depends(require_admin),
+                     db: Session = Depends(get_db)):
+    """Turn off someone's second factor when they've lost both phone and codes.
+
+    This is a back door, and it is deliberately shaped like one. It can only
+    *remove* protection — an admin cannot enrol an authenticator on someone
+    else's behalf, so this can never be used to take an account over silently:
+    the owner sees two-factor is off the next time they sign in, and can turn it
+    back on.
+
+    It stays with admins because the alternative is worse. Without it, a lost
+    phone plus lost recovery codes means editing the database by hand, which
+    needs shell access to the server — a far bigger privilege than this.
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not user.totp_enabled and not user.totp_secret:
+        raise HTTPException(status_code=400,
+                            detail="Two-factor is not set up on that account")
+
+    user.totp_enabled = False
+    user.totp_enabled_at = None
+    user.set_totp_secret("")
+    user.totp_recovery = None
+    db.commit()
+    return {"ok": True, "email": user.email}

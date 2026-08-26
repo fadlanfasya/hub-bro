@@ -17,6 +17,8 @@ class UserOut(BaseModel):
     is_active: bool
     created_at: Optional[datetime] = None
     last_login_at: Optional[datetime] = None
+    # shown on the Users page so an admin knows whether a reset is even possible
+    totp_enabled: bool = False
 
     class Config:
         from_attributes = True

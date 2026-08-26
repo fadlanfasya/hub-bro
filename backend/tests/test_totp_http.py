@@ -131,6 +131,47 @@ check("a colleague who didn't opt in is unaffected",
       client.post("/api/auth/login",
                   data={"username": "b@x.com", "password": PW}).status_code, 200)
 
+print("an admin can reset someone who lost phone and codes")
+# Re-enrol a@x.com so there is something to reset.
+guard.forget()
+setup = client.post("/api/auth/totp/setup", headers=H, json={"password": PW}).json()
+client.post("/api/auth/totp/enable", headers=H,
+            json={"code": totp_lib.code_at(setup["secret"])})
+check("on again", client.get("/api/auth/totp", headers=H).json()["enabled"], True)
+
+s2 = SessionLocal()
+victim = s2.query(User).filter(User.email == "b@x.com").first()
+victim_id = victim.id
+s2.close()
+
+btok = client.post("/api/auth/login",
+                   data={"username": "b@x.com", "password": PW}).json()["access_token"]
+BH = {"Authorization": f"Bearer {btok}"}
+check("an editor cannot reset anyone",
+      client.post(f"/api/users/1/totp/reset", headers=BH).status_code, 403)
+
+s3 = SessionLocal()
+me = s3.query(User).filter(User.email == "a@x.com").first()
+my_id = me.id
+s3.close()
+check("an admin can",
+      client.post(f"/api/users/{my_id}/totp/reset", headers=H).status_code, 200)
+check("and it really is off",
+      client.get("/api/auth/totp", headers=H).json()["enabled"], False)
+guard.forget()
+check("so a password alone signs in again", login().status_code, 200)
+
+check("resetting an account without it is refused",
+      client.post(f"/api/users/{victim_id}/totp/reset", headers=H).status_code, 400)
+check("an unknown user 404s",
+      client.post("/api/users/999999/totp/reset", headers=H).status_code, 404)
+
+print("the QR is scannable, not just a key to type")
+setup = client.post("/api/auth/totp/setup", headers=H, json={"password": PW}).json()
+check("an SVG comes back", setup["qr_svg"].lstrip().startswith("<?xml"), True)
+check("it is a real drawing, not an empty box", len(setup["qr_svg"]) > 1000, True)
+check("and the key is still there to type by hand", len(setup["secret"]) >= 32, True)
+
 guard.forget()
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

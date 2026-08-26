@@ -720,6 +720,23 @@ table.data .cell-bar-fill.tone-blue { background: #60a5fa; }
 table.data .cell-bar-fill.tone-purple { background: #a78bfa; }
 table.data .cell-bar-fill.tone-muted { background: var(--muted); }
 
+/* ---- account page ---- */
+/* Change password and Two-factor sit side by side: they are the same kind of
+   thing — settings for your own sign-in — and stacking them pushed the second
+   below the fold where nobody found it. */
+.account-columns {
+  display: grid; gap: var(--space-5); margin-top: var(--space-5);
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  align-items: start;
+}
+.totp-qr {
+  display: flex; justify-content: center;
+  background: #fff; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: var(--space-3); margin: var(--space-2) 0;
+}
+/* the generated SVG carries mm units; make it fit the card instead */
+.totp-qr svg { width: 190px; height: 190px; display: block; }
+
 /* ---- dashboard folders ---- */
 .folder-group + .folder-group { margin-top: var(--space-6); }
 .folder-heading {

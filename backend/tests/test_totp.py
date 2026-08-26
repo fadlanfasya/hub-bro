@@ -133,5 +133,28 @@ check("so does a corrupted one",
       totp.consume_recovery_code("not json", codes[1])[0], False)
 check("and it doesn't crash counting them", totp.recovery_codes_left("not json"), 0)
 
+print("the QR is a convenience, not a requirement")
+# An optional dependency that isn't installed must not take enrolment down.
+import builtins  # noqa: E402
+_real_import = builtins.__import__
+
+
+def _no_qrcode(name, *a, **k):
+    if name.startswith("qrcode"):
+        raise ModuleNotFoundError("No module named 'qrcode'")
+    return _real_import(name, *a, **k)
+
+
+builtins.__import__ = _no_qrcode
+try:
+    check("a missing qrcode package returns empty, never raises",
+          totp.qr_svg("otpauth://totp/x"), "")
+finally:
+    builtins.__import__ = _real_import
+
+svg = totp.qr_svg("otpauth://totp/Hub-Bro:a@x.com?secret=ABC234")
+check("and draws a real code when it is installed", len(svg) > 1000, True)
+check("as SVG", svg.lstrip().startswith("<?xml"), True)
+
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

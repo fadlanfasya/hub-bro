@@ -68,6 +68,34 @@ def verify(secret: str, code: str, at: float | None = None,
                for offset in range(-drift, drift + 1))
 
 
+def qr_svg(uri: str) -> str:
+    """The provisioning URI as an inline SVG, or "" if it can't be drawn.
+
+    Rendered on the server rather than shipping a QR library to the browser:
+    the secret is already here, and this way it never has to be handed to a
+    third-party script to be drawn. SVG rather than PNG so it stays sharp and
+    needs no image encoder.
+
+    A missing `qrcode` package returns "" instead of raising. The QR is a
+    convenience — the secret and the otpauth link are the actual requirement —
+    so an optional dependency that isn't installed yet must not take the whole
+    enrolment down with an unexplained 500.
+    """
+    try:
+        import io
+        import qrcode
+        import qrcode.image.svg
+    except ImportError:
+        return ""
+
+    code = qrcode.QRCode(box_size=10, border=2)
+    code.add_data(uri)
+    code.make(fit=True)
+    buffer = io.BytesIO()
+    code.make_image(image_factory=qrcode.image.svg.SvgPathImage).save(buffer)
+    return buffer.getvalue().decode("utf-8")
+
+
 def provisioning_uri(secret: str, account: str, issuer: str = "Hub-Bro") -> str:
     """The otpauth:// URI an authenticator app scans."""
     label = quote(f"{issuer}:{account}", safe="")

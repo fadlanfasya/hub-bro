@@ -3,6 +3,23 @@ import { AlertCircle, Check, Loader2, ShieldCheck, ShieldOff, Copy } from 'lucid
 import { auth } from '../api'
 import { useAuth, ROLE_LABELS } from '../useAuth'
 
+/**
+ * Turn a failed request into something a person can act on.
+ *
+ * A bare "That did not work" hides the difference between a wrong password and
+ * a 500, which is exactly the case that costs an afternoon: the server said
+ * nothing useful, so the message must at least say the server broke.
+ */
+function describeError(err) {
+  const detail = err.response?.data?.detail
+  if (typeof detail === 'string' && detail) return detail
+  if (detail?.message) return detail.message
+  const status = err.response?.status
+  if (status >= 500) return `The server failed (${status}). Check the server log.`
+  if (status) return `Request failed (${status}).`
+  return 'Could not reach the server.'
+}
+
 export default function Account() {
   const { user } = useAuth()
   const [current, setCurrent] = useState('')
@@ -25,7 +42,7 @@ export default function Account() {
       setDone(true)
       setCurrent(''); setNext(''); setConfirm('')
     } catch (err) {
-      setError(err.response?.data?.detail || 'Could not change the password')
+      setError(describeError(err))
     } finally {
       setBusy(false)
     }
@@ -40,7 +57,7 @@ export default function Account() {
         </div>
       </div>
 
-      <div className="card" style={{ maxWidth: 520 }}>
+      <div className="card">
         <h2>Your role</h2>
         <p className="muted">
           You are {ROLE_LABELS[user?.role] === 'Admin' ? 'an' : 'a'}{' '}
@@ -52,7 +69,8 @@ export default function Account() {
         <p className="hint">Ask an admin if you need different access.</p>
       </div>
 
-      <form className="card" style={{ maxWidth: 520, marginTop: 20 }} onSubmit={submit}>
+      <div className="account-columns">
+      <form className="card" onSubmit={submit}>
         <h2>Change password</h2>
         <label>Current password</label>
         <input type="password" required value={current}
@@ -81,6 +99,7 @@ export default function Account() {
       </form>
 
       <TwoFactor />
+      </div>
     </div>
   )
 }
@@ -101,7 +120,7 @@ function TwoFactor() {
   const run = async (fn) => {
     setError(''); setBusy(true)
     try { await fn() } catch (err) {
-      setError(err.response?.data?.detail || 'That did not work')
+      setError(describeError(err))
     } finally { setBusy(false) }
   }
 
@@ -125,8 +144,8 @@ function TwoFactor() {
   if (!status) return null
 
   return (
-    <div className="card" style={{ maxWidth: 520, marginTop: 24 }}>
-      <h2 style={{ marginTop: 0, fontSize: 17 }}>Two-factor sign-in</h2>
+    <div className="card">
+      <h2>Two-factor sign-in</h2>
       <p className="page-subtitle">
         {status.enabled
           ? 'On for your account. Nobody else is affected.'
@@ -169,14 +188,17 @@ function TwoFactor() {
       {setup && (
         <>
           <label>1. Add this to your authenticator app</label>
-          <p className="hint" style={{ marginBottom: 6 }}>
-            Scan the link below in Google Authenticator, Authy or similar — or
-            type the key in by hand.
+          {setup.qr_svg
+            ? <div className="totp-qr" dangerouslySetInnerHTML={{ __html: setup.qr_svg }} />
+            : <a href={setup.uri} className="link">Open in your authenticator app</a>}
+          <p className="hint">
+            {setup.qr_svg
+              ? "Scan it with Google Authenticator, Authy, 1Password — any of them. Can't scan? Type this key in instead:"
+              : 'Or type this key in by hand:'}
           </p>
           <pre style={{ fontFamily: 'var(--font-mono)', fontSize: 12, wordBreak: 'break-all' }}>
             {setup.secret}
           </pre>
-          <a href={setup.uri} className="link" style={{ fontSize: 13 }}>Open in authenticator app</a>
 
           <label style={{ marginTop: 14 }}>2. Enter the code it shows</label>
           <input value={code} inputMode="numeric" placeholder="123456"
