@@ -153,6 +153,15 @@ export default function WidgetConfigModal({
       delete opts.thresholds
     }
     // a text widget renders its own content, so it has no data source
+    // Don't store a spec that can't do anything. A widget duplicated from
+    // another carries the original's count_by and unpivot, and an empty one
+    // used to sit in the saved dashboard looking harmless — until a path that
+    // reads the stored options rather than the filtered ones tripped over it.
+    if (!opts.count_by?.column?.trim() || !opts.count_by?.buckets?.length) {
+      delete opts.count_by
+    }
+    if (!opts.unpivot?.columns?.length) delete opts.unpivot
+
     const cleanFormats = (opts.column_format || []).filter((f) => f.column?.trim())
     if (cleanFormats.length) opts.column_format = cleanFormats
     else delete opts.column_format

@@ -43,7 +43,14 @@ def get_public_dashboard(token: str, db: Session = Depends(get_db)):
                for w in definition.get("widgets", [])]
     return {
         "name": d.name,
-        "definition": {"widgets": widgets, "layout": definition.get("layout", [])},
+        "definition": {
+            "widgets": widgets,
+            "layout": definition.get("layout", []),
+            # The theme is presentation, not data, and the shared view already
+            # asks for it — without this a shared dashboard silently loses the
+            # colours it was designed with.
+            "theme": definition.get("theme"),
+        },
         "read_only": True,
     }
 

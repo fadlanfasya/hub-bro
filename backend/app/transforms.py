@@ -415,15 +415,57 @@ def join_results(parts: list, spec: dict) -> dict:
     return out
 
 
+def _active_count_by(spec) -> dict | None:
+    """A count_by that can actually do something, or None.
+
+    An empty `{"column": "", "buckets": []}` is a truthy dict, so `if count_by`
+    used to take the branch, do nothing, and return early — silently skipping
+    group_by, sort and limit. Widgets accumulate specs like that by being
+    duplicated from another widget, and the browser hid the problem by
+    filtering them out before sending. The saved dashboard did not, so the
+    shared view of the same widget behaved differently from the editor.
+
+    Deciding it here means both paths get the same answer, because both come
+    through this function.
+    """
+    if isinstance(spec, dict) and spec.get("column") and spec.get("buckets"):
+        return spec
+    return None
+
+
+def _active_unpivot(spec, columns) -> dict | None:
+    """An unpivot naming at least one column the data actually has."""
+    if not isinstance(spec, dict):
+        return None
+    wanted = [c for c in (spec.get("columns") or []) if c]
+    if wanted and any(c in columns for c in wanted):
+        return spec
+    return None
+
+
 def apply_transforms(result: dict, options: dict) -> dict:
     """Return a new {columns, rows} with the widget's shaping applied."""
     rows = list(result.get("rows") or [])
     columns = list(result.get("columns") or [])
 
-    # 0. unpivot — reshape before anything else looks at column names
+    # 0. unpivot — reshape before anything else looks at column names.
+    #
+    # Unless there is a count_by, in which case it has to wait: count_by turns
+    # rows into one wide row of named counts, and unpivoting that back into one
+    # row per bucket is exactly what a pie or bar chart needs. Running it first
+    # would reshape the raw rows instead and then be thrown away.
+    count_by = _active_count_by(options.get("count_by"))
     unpivot = options.get("unpivot")
-    if unpivot and unpivot.get("columns"):
-        rows, columns = apply_unpivot(rows, columns, unpivot)
+    # Before count_by the unpivot must name columns the data already has;
+    # afterwards it names buckets that only exist once count_by has run.
+    if count_by:
+        unpivot_after = unpivot if (unpivot or {}).get("columns") else None
+        unpivot_before = None
+    else:
+        unpivot_after = None
+        unpivot_before = _active_unpivot(unpivot, columns)
+    if unpivot_before:
+        rows, columns = apply_unpivot(rows, columns, unpivot_before)
 
     # 0b. computed date distances — before filters, so "expiring in 60 days"
     # can filter on the number this produces
@@ -448,9 +490,12 @@ def apply_transforms(result: dict, options: dict) -> dict:
 
     # 1c. bucket counts — after filtering, before grouping, because it replaces
     # the rows entirely with a single summary row
-    count_by = options.get("count_by")
     if count_by:
         rows, columns = apply_count_by(rows, columns, count_by)
+        # A stat reads that wide row directly; a pie or bar needs it turned
+        # back into one row per bucket, which is what unpivot does here.
+        if _active_unpivot(unpivot_after, columns):
+            rows, columns = apply_unpivot(rows, columns, unpivot_after)
         return {"columns": columns, "rows": rows}
 
     # 2. group + aggregate

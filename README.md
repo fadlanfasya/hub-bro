@@ -40,6 +40,7 @@ container.
 - Dashboard folders, pinning, and a back button that returns to the dashboard you drilled down from
 - Read-only share links and a kiosk mode for wall displays
 - Credentials encrypted at rest and masked in API responses
+- Login throttling per account and per client address, with a backing-off lockout that always expires
 
 ## Stack
 
@@ -267,7 +268,7 @@ If Redis is configured but unreachable, the app logs a warning and falls back to
 
 - Joining several queries into one table works **within a single data source**. A table can't mix Prometheus with SQL.
 - `?q=` filtering happens in the browser, so the server still sends every row before one is shown.
-- There's no rate limiting on login. Fine on a private network; add Cloudflare Access or similar before exposing the app publicly.
+- Login throttling is held in memory, so it resets when the container restarts. That is deliberate — the alternative is a database write per failed password — but it means a determined attacker gains a fresh quota after a restart. Put something at the edge before exposing the app publicly.
 - Version history keeps the last 30 snapshots per dashboard, and collapses saves made by the same person within two minutes.
 - GLPI fetches up to **Max rows** per widget (default 1000). Above that, a widget shows "Showing N of M" and its counts cover only the fetched rows.
 

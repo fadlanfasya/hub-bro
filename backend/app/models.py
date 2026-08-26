@@ -22,6 +22,23 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login_at = Column(DateTime, nullable=True)
 
+    # --- second factor, opt-in per person ---
+    # base32 secret, encrypted at rest; present but not enabled while enrolling
+    totp_secret = Column(String, nullable=True)
+    totp_enabled = Column(Boolean, nullable=False, default=False)
+    # JSON list of hashed single-use recovery codes
+    totp_recovery = Column(Text, nullable=True)
+    totp_enabled_at = Column(DateTime, nullable=True)
+
+    @property
+    def totp_secret_plain(self) -> str:
+        from .secrets_store import decrypt
+        return decrypt(self.totp_secret or "")
+
+    def set_totp_secret(self, value: str) -> None:
+        from .secrets_store import encrypt
+        self.totp_secret = encrypt(value) if value else None
+
     # Dashboards and data sources belong to the workspace, not to a person —
     # `owner` records who created them. Deleting a user must not delete shared
     # content, so there is deliberately no delete cascade here.

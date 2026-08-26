@@ -40,6 +40,12 @@ ADDED_COLUMNS = {
         "role": "VARCHAR DEFAULT 'viewer'",
         "is_active": "BOOLEAN DEFAULT 1",
         "last_login_at": "DATETIME",
+        # nobody is opted in by an upgrade — a second factor appearing
+        # unannounced would lock people out of their own workspace
+        "totp_secret": "VARCHAR",
+        "totp_enabled": "BOOLEAN DEFAULT 0",
+        "totp_recovery": "TEXT",
+        "totp_enabled_at": "DATETIME",
     },
 }
 

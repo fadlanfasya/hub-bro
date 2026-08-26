@@ -24,12 +24,17 @@ export const auth = {
   registrationStatus: () => api.get('/auth/registration'),
   changePassword: (current_password, new_password) =>
     api.post('/auth/change-password', { current_password, new_password }),
-  login: (email, password) => {
+  login: (email, password, totpCode) => {
     const form = new URLSearchParams()
     form.set('username', email)
     form.set('password', password)
+    if (totpCode) form.set('totp_code', totpCode)
     return api.post('/auth/login', form)
   },
+  totpStatus: () => api.get('/auth/totp'),
+  totpSetup: (password) => api.post('/auth/totp/setup', { password }),
+  totpEnable: (code) => api.post('/auth/totp/enable', { code }),
+  totpDisable: (password, code) => api.post('/auth/totp/disable', { password, code }),
   me: () => api.get('/auth/me'),
 }
 

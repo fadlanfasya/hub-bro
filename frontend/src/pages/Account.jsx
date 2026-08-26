@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { AlertCircle, Check, Loader2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { AlertCircle, Check, Loader2, ShieldCheck, ShieldOff, Copy } from 'lucide-react'
 import { auth } from '../api'
 import { useAuth, ROLE_LABELS } from '../useAuth'
 
@@ -79,6 +79,141 @@ export default function Account() {
           </button>
         </div>
       </form>
+
+      <TwoFactor />
+    </div>
+  )
+}
+
+/** Opt-in second factor. Nobody is enrolled unless they choose to be. */
+function TwoFactor() {
+  const [status, setStatus] = useState(null)
+  const [password, setPassword] = useState('')
+  const [code, setCode] = useState('')
+  const [setup, setSetup] = useState(null)      // {secret, uri} while enrolling
+  const [codes, setCodes] = useState(null)      // recovery codes, shown once
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const load = () => auth.totpStatus().then((r) => setStatus(r.data)).catch(() => {})
+  useEffect(() => { load() }, [])
+
+  const run = async (fn) => {
+    setError(''); setBusy(true)
+    try { await fn() } catch (err) {
+      setError(err.response?.data?.detail || 'That did not work')
+    } finally { setBusy(false) }
+  }
+
+  const start = () => run(async () => {
+    const r = await auth.totpSetup(password)
+    setSetup(r.data); setPassword('')
+  })
+
+  const enable = () => run(async () => {
+    const r = await auth.totpEnable(code)
+    setCodes(r.data.recovery_codes); setSetup(null); setCode('')
+    await load()
+  })
+
+  const disable = () => run(async () => {
+    await auth.totpDisable(password, code)
+    setPassword(''); setCode(''); setCodes(null)
+    await load()
+  })
+
+  if (!status) return null
+
+  return (
+    <div className="card" style={{ maxWidth: 520, marginTop: 24 }}>
+      <h2 style={{ marginTop: 0, fontSize: 17 }}>Two-factor sign-in</h2>
+      <p className="page-subtitle">
+        {status.enabled
+          ? 'On for your account. Nobody else is affected.'
+          : 'Optional. Adds a six-digit code from an authenticator app to your sign-in.'}
+      </p>
+
+      {codes && (
+        <>
+          <div className="status-pill ok" style={{ marginBottom: 10 }}>
+            <Check size={12} /> Two-factor is on
+          </div>
+          <label>Recovery codes</label>
+          <pre style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}>{codes.join('\n')}</pre>
+          <p className="hint">
+            Save these somewhere other than your phone. Each works once, and this
+            is the only time they can be shown — they are stored hashed, so
+            nobody can produce them again.
+          </p>
+          <button type="button" className="secondary small"
+            onClick={() => navigator.clipboard?.writeText(codes.join('\n'))}>
+            <Copy size={13} /> Copy
+          </button>
+        </>
+      )}
+
+      {!status.enabled && !setup && !codes && (
+        <>
+          <label>Confirm your password</label>
+          <input type="password" value={password} autoComplete="current-password"
+            onChange={(e) => setPassword(e.target.value)} />
+          <p className="hint">
+            Asked again so a stolen session can't attach someone else's authenticator.
+          </p>
+          <button type="button" disabled={busy || !password} onClick={start}>
+            <ShieldCheck size={14} /> Set up
+          </button>
+        </>
+      )}
+
+      {setup && (
+        <>
+          <label>1. Add this to your authenticator app</label>
+          <p className="hint" style={{ marginBottom: 6 }}>
+            Scan the link below in Google Authenticator, Authy or similar — or
+            type the key in by hand.
+          </p>
+          <pre style={{ fontFamily: 'var(--font-mono)', fontSize: 12, wordBreak: 'break-all' }}>
+            {setup.secret}
+          </pre>
+          <a href={setup.uri} className="link" style={{ fontSize: 13 }}>Open in authenticator app</a>
+
+          <label style={{ marginTop: 14 }}>2. Enter the code it shows</label>
+          <input value={code} inputMode="numeric" placeholder="123456"
+            style={{ letterSpacing: '.18em' }}
+            onChange={(e) => setCode(e.target.value)} />
+          <p className="hint">
+            Nothing changes until this matches — a mis-scanned code is how people
+            lock themselves out.
+          </p>
+          <button type="button" disabled={busy || code.length < 6} onClick={enable}>
+            Turn it on
+          </button>
+        </>
+      )}
+
+      {status.enabled && !codes && (
+        <>
+          <div className="status-pill ok" style={{ marginBottom: 12 }}>
+            <ShieldCheck size={12} /> On · {status.recovery_codes_left} recovery codes left
+          </div>
+          <label>Password</label>
+          <input type="password" value={password} autoComplete="current-password"
+            onChange={(e) => setPassword(e.target.value)} />
+          <label>Current code</label>
+          <input value={code} inputMode="numeric" placeholder="123456"
+            onChange={(e) => setCode(e.target.value)} />
+          <p className="hint">A recovery code works here too.</p>
+          <button type="button" className="danger" disabled={busy || !password || !code}
+            onClick={disable}>
+            <ShieldOff size={14} /> Turn off two-factor
+          </button>
+        </>
+      )}
+
+      {error && <div className="error" style={{ marginTop: 12 }}>
+        <AlertCircle size={14} />{error}
+      </div>}
     </div>
   )
 }

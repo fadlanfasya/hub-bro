@@ -181,5 +181,77 @@ check("unknown column filters everything out", len(r["rows"]), 0)
 r = apply_transforms(SAMPLE, {"group_by": "site", "aggregate": "sum", "value_column": "name"})
 check("summing non-numeric yields 0", [x["sum_name"] for x in r["rows"]], [0, 0])
 
+
+print("count_by then unpivot, for a pie of buckets")
+# A stat reads count_by's wide row directly. A pie needs one row per bucket,
+# and unpivot used to run first — before the buckets existed — so it was
+# silently discarded and the chart had nothing to draw.
+contracts = {"columns": ["days_left"],
+             "rows": [{"days_left": v} for v in (-294, -41, 6, 23, 100)]}
+buckets = {"column": "days_left", "total_as": "total", "buckets": [
+    {"as": "expired", "max": -1},
+    {"as": "soon", "min": 0, "max": 60},
+    {"as": "healthy", "min": 61}]}
+
+wide = apply_transforms(contracts, {"count_by": buckets})
+check("without unpivot a stat still gets one wide row",
+      wide["rows"], [{"expired": 2, "soon": 2, "healthy": 1, "total": 5}])
+
+tall = apply_transforms(contracts, {
+    "count_by": buckets,
+    "unpivot": {"columns": ["expired", "soon", "healthy"],
+                "name": "name", "value": "value"}})
+check("with unpivot a pie gets one row per bucket", len(tall["rows"]), 3)
+check("named", [r["name"] for r in tall["rows"]], ["expired", "soon", "healthy"])
+check("and counted", [r["value"] for r in tall["rows"]], [2, 2, 1])
+check("the total rides along for a label", tall["rows"][0]["total"], 5)
+
+check("unpivot on its own is unchanged",
+      apply_transforms({"columns": ["sukses", "gagal"], "rows": [{"sukses": 10, "gagal": 2}]},
+                       {"unpivot": {"columns": ["sukses", "gagal"],
+                                    "name": "name", "value": "value"}})["rows"],
+      [{"name": "sukses", "value": 10}, {"name": "gagal", "value": 2}])
+
+check("a bucket that catches nothing still gets a slice",
+      [r["value"] for r in apply_transforms(
+          {"columns": ["days_left"], "rows": [{"days_left": 100}]},
+          {"count_by": buckets,
+           "unpivot": {"columns": ["expired", "soon", "healthy"],
+                       "name": "name", "value": "value"}})["rows"]],
+      [0, 0, 1])
+
+print("a leftover spec must not change what a widget does")
+# A widget duplicated from another carries its count_by and unpivot. Empty ones
+# are truthy dicts, and the browser filtered them out before sending while the
+# saved dashboard kept them — so the editor and the shared view of the same
+# widget disagreed. This is that case.
+LEFTOVER = {
+    "group_by": "type", "aggregate": "count",
+    "count_by": {"column": "", "unknown_as": "", "total_as": "", "buckets": []},
+    "unpivot": {"columns": ["expired", "soon", "healthy"],
+                "name": "name", "value": "value"},
+}
+kinds = ['Peningkatan'] * 75 + ['Perubahan'] * 38 + ['Perbaikan'] * 17 \
+    + ['Pembaruan'] * 15 + ['Penambahan'] * 14
+crs = {"columns": ["ticket_number", "type", "title"],
+       "rows": [{"ticket_number": f"CR-{i}", "type": t, "title": "x"}
+                for i, t in enumerate(kinds)]}
+filtered = {k: v for k, v in LEFTOVER.items() if k != "count_by"}
+
+check("an empty count_by no longer swallows group_by",
+      len(apply_transforms(crs, LEFTOVER)["rows"]), 5)
+check("both paths now agree",
+      apply_transforms(crs, LEFTOVER), apply_transforms(crs, filtered))
+check("and the grouping is right",
+      apply_transforms(crs, LEFTOVER)["rows"][0], {"type": "Peningkatan", "count": 75})
+
+check("an unpivot naming columns the data lacks is ignored",
+      apply_transforms(crs, {"unpivot": {"columns": ["expired", "soon"],
+                                         "name": "name", "value": "value"}})["columns"],
+      ["ticket_number", "type", "title"])
+check("sort and limit survive an empty count_by too",
+      [r["type"] for r in apply_transforms(crs, {**LEFTOVER,
+       "sort": {"column": "count", "dir": "desc"}, "limit": 2})["rows"]],
+      ["Peningkatan", "Perubahan"])
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

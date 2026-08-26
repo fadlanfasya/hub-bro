@@ -11,6 +11,8 @@ export default function Login() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [setupNeeded, setSetupNeeded] = useState(false)
+  const [mfaCode, setMfaCode] = useState('')
+  const [mfaNeeded, setMfaNeeded] = useState(false)
   const navigate = useNavigate()
   const { refresh } = useAuth()
 
@@ -26,12 +28,20 @@ export default function Login() {
     setError('')
     setBusy(true)
     try {
-      const res = await auth.login(email, password)
+      const res = await auth.login(email, password, mfaCode)
       localStorage.setItem('token', res.data.access_token)
       await refresh()
       navigate('/')
     } catch (err) {
-      setError(err.response?.data?.detail || 'Login failed')
+      const detail = err.response?.data?.detail
+      // the server flags the second factor rather than making the UI match on
+      // wording, so the message can change without breaking this screen
+      if (detail && typeof detail === 'object' && detail.mfa_required) {
+        setMfaNeeded(true)
+        setError(detail.message || 'Enter the code from your authenticator app.')
+      } else {
+        setError((typeof detail === 'string' && detail) || 'Login failed')
+      }
       setBusy(false)
     }
   }
@@ -49,6 +59,18 @@ export default function Login() {
               onChange={(e) => setEmail(e.target.value)} required autoFocus />
             <label>Password</label>
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+            {mfaNeeded && (
+              <>
+                <label>Authenticator code</label>
+                <input value={mfaCode} onChange={(e) => setMfaCode(e.target.value)}
+                  inputMode="numeric" autoComplete="one-time-code" autoFocus
+                  placeholder="123456" style={{ letterSpacing: '.18em' }} />
+                <p className="hint">
+                  Six digits from your app — or one of your recovery codes if you
+                  don't have your phone.
+                </p>
+              </>
+            )}
             {error && <div className="error"><AlertCircle size={14} />{error}</div>}
             <div style={{ marginTop: 20 }}>
               <button type="submit" disabled={busy} style={{ width: '100%', justifyContent: 'center' }}>
