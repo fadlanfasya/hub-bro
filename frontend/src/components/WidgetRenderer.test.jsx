@@ -495,3 +495,43 @@ describe('a table opened from a drill-down link', () => {
     expect(container.querySelectorAll('tbody tr')).toHaveLength(0)
   })
 })
+
+describe('the tick-style bar gauge', () => {
+  const withBars = (options) => ({ ...base, type: 'table', options })
+
+  it('puts the fill inside a track, not directly in the cell', async () => {
+    const { container } = await mount(withBars({ bar_columns: ['total'] }))
+    const track = container.querySelector('.cell-bar-track')
+    expect(track).not.toBeNull()
+    expect(track.querySelector('.cell-bar-fill')).not.toBeNull()
+  })
+
+  it('keeps the number outside the track', async () => {
+    // it used to sit on top of the coloured fill, competing with it
+    const { container } = await mount(withBars({ bar_columns: ['total'] }))
+    const text = container.querySelector('.cell-bar-text')
+    expect(text.closest('.cell-bar-track')).toBeNull()
+    expect(text.textContent).toBe('23159')
+  })
+
+  it('still scales the fill to the busiest row', async () => {
+    const { container } = await mount(withBars({ bar_columns: ['total'] }))
+    expect([...container.querySelectorAll('.cell-bar-fill')].map((el) => el.style.width))
+      .toEqual(['100%', '13.89%'])
+  })
+
+  it('still carries the colour rule onto the fill', async () => {
+    const { container } = await mount(withBars({
+      bar_columns: ['total'],
+      color_rules: [{ column: 'total', op: 'gt', value: 10000, tone: 'bad' }],
+    }))
+    const fills = [...container.querySelectorAll('.cell-bar-fill')]
+    expect(fills[0].className).toContain('tone-bad')
+    expect(fills[1].className).not.toContain('tone-bad')
+  })
+
+  it('draws one track per barred cell and no more', async () => {
+    const { container } = await mount(withBars({ bar_columns: ['total'] }))
+    expect(container.querySelectorAll('.cell-bar-track')).toHaveLength(2)
+  })
+})

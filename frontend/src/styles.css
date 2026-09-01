@@ -1,8 +1,12 @@
 * { box-sizing: border-box; }
 
 :root {
-  --font-ui: 'Inter Variable', Inter, system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono Variable', ui-monospace, Consolas, monospace;
+  /* Instrument Sans carries more weight at the same size than Inter, which is
+     most of what makes this feel firmer. JetBrains Mono is not decoration here:
+     it marks the small uppercase labels and the numbers, so a figure never
+     shifts width as it ticks. */
+  --font-ui: 'Instrument Sans', 'Inter Variable', Inter, system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'JetBrains Mono Variable', ui-monospace, Consolas, monospace;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -12,33 +16,46 @@
   --space-6: 32px;
   --space-7: 48px;
 
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 12px;
+  /* 6px throughout. Soft corners read as friendly and tentative; this reads as
+     built. The pill stays round because a status chip should not look like a
+     button you can press. */
+  --radius-sm: 6px;
+  --radius-md: 6px;
+  --radius-lg: 6px;
   --radius-pill: 9999px;
 
   --z-dropdown: 100;
   --z-modal-backdrop: 200;
   --z-modal: 210;
+  --z-preview: 220;
 
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --sidebar-w: 250px;
   --rail-w: 64px;
 }
 
-/* ---- light theme (Preline palette + Hub-Bro brand green) ---- */
+/* ---- light theme (white page + Hub-Bro brand green) ---- */
+/* Page and cards are both white, so the border is the only thing separating a
+   panel from the page — which is why it is a step darker than a hairline would
+   normally be. The warm neutrals stay in the fills and the ink, so the palette
+   still reads warm rather than clinical. */
 :root,
 :root[data-theme='light'] {
-  --bg: #f9fafb;          /* page background (gray-50) */
+  --bg: #ffffff;          /* page background */
   --surface: #ffffff;     /* cards, sidebar, toolbars */
-  --surface-2: #f3f4f6;   /* hover / active fills (gray-100) */
-  --surface-3: #f9fafb;
-  --border: #e5e7eb;      /* gray-200 */
-  --border-strong: #d1d5db;
-  --ink: #1f2937;         /* gray-800 */
-  --ink-2: #4b5563;       /* gray-600 */
-  --muted: #6b7280;       /* gray-500 */
-  --faint: #9ca3af;       /* gray-400 */
+  --surface-2: #F1EFE8;   /* hover / active fills */
+  --surface-3: #FAF9F5;   /* inset wells: inputs, code, bar tracks */
+  --border: #CFCBBE;      /* hairlines *inside* a panel: table rows, dividers */
+  --border-strong: #A9A497;
+  /* The outline of a panel: the brand green, thinned to a line rather than a
+     bar. Still clearly stronger than the hairline inside a panel (2.16 vs
+     1.62 against white), so a card announces where it starts — but it belongs
+     to the palette instead of framing everything in black. */
+  --border-panel: #8ABAAC;
+  --ink: #0F1512;         /* near-black, not grey-800 */
+  --ink-2: #3A443E;
+  --muted: #6B7670;
+  --faint: #8B9490;
 
   --primary: #00694A;
   --primary-strong: #00543B;
@@ -46,35 +63,44 @@
   --primary-soft: #E6F0EC;
 
   --accent: #E9B452;
-  --danger: #dc2626;
-  --danger-soft: #fef2f2;
+  /* a warmer red, so danger belongs to this palette instead of arriving from
+     a different one */
+  --danger: #D93A28;
+  --danger-soft: #FBEDEA;
   --danger-ink: #ffffff;
   --success: #00694A;
   --success-soft: #E6F0EC;
 
   --chart-1: #00694A;
   --chart-2: #E9B452;
-  --chart-3: #2563eb;
-  --chart-4: #db2777;
-  --chart-5: #0891b2;
-  --chart-6: #7c3aed;
+  --chart-3: #2EA884;
+  --chart-4: #D93A28;
+  --chart-5: #3A443E;
+  --chart-6: #8FC7B4;
 
-  --shadow-sm: 0 1px 2px rgba(16, 24, 40, .05);
-  --shadow-md: 0 4px 12px rgba(16, 24, 40, .08);
+  /* Borders carry the separation now, so shadows are almost gone. A card that
+     needs a shadow to look like a card usually has too little contrast. */
+  --shadow-sm: 0 1px 0 rgba(15, 21, 18, .04);
+  --shadow-md: 0 2px 6px rgba(15, 21, 18, .07);
 }
 
-/* ---- dark theme (same structure, dark surfaces) ---- */
+/* ---- dark theme ---- */
+/* Designed as its own thing rather than the light theme inverted: the greens
+   are warmed toward the surface so the brand still reads as the brand at 2am. */
 :root[data-theme='dark'] {
-  --bg: #0d1117;
-  --surface: #161b22;
-  --surface-2: #21262d;
-  --surface-3: #1c2128;
-  --border: #30363d;
-  --border-strong: #3d444d;
-  --ink: #e6edf3;
-  --ink-2: #c9d1d9;
-  --muted: #8b949e;
-  --faint: #6e7681;
+  --bg: #121815;
+  --surface: #1A221E;
+  --surface-2: #26312B;
+  --surface-3: #1C2620;
+  --border: #26312B;
+  --border-strong: #34413A;
+  /* Same idea inverted: the green lifted off the surface just enough to draw
+     the edge, not a pale ring around every card. */
+  --border-panel: #235D4B;
+  --ink: #E9F0EB;
+  --ink-2: #B7C3BC;
+  --muted: #8A968F;
+  --faint: #6E7A73;
 
   --primary: #2ea884;        /* brand green lifted for contrast on dark */
   --primary-strong: #3fbf99;
@@ -82,33 +108,33 @@
   --primary-soft: rgba(46, 168, 132, .14);
 
   --accent: #E9B452;
-  --danger: #f85149;
-  --danger-soft: rgba(248, 81, 73, .12);
-  --danger-ink: #1a0d0c;
+  --danger: #F0603A;
+  --danger-soft: rgba(240, 96, 58, .14);
+  --danger-ink: #12100E;
   --success: #2ea884;
   --success-soft: rgba(46, 168, 132, .14);
 
-  --chart-1: #2ea884;
+  --chart-1: #2EA884;
   --chart-2: #E9B452;
-  --chart-3: #58a6ff;
-  --chart-4: #f778ba;
-  --chart-5: #39c5cf;
-  --chart-6: #a371f7;
+  --chart-3: #8FC7B4;
+  --chart-4: #F0603A;
+  --chart-5: #B7C3BC;
+  --chart-6: #5B6862;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .3);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, .4);
+  --shadow-sm: 0 1px 0 rgba(0, 0, 0, .25);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, .35);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']):not([data-theme='dark']) {
-    --bg: #0d1117; --surface: #161b22; --surface-2: #21262d; --surface-3: #1c2128;
-    --border: #30363d; --border-strong: #3d444d;
-    --ink: #e6edf3; --ink-2: #c9d1d9; --muted: #8b949e; --faint: #6e7681;
+    --bg: #121815; --surface: #1A221E; --surface-2: #26312B; --surface-3: #1C2620;
+    --border: #26312B; --border-strong: #34413A; --border-panel: #235D4B;
+    --ink: #E9F0EB; --ink-2: #B7C3BC; --muted: #8A968F; --faint: #6E7A73;
     --primary: #2ea884; --primary-strong: #3fbf99; --primary-ink: #06231a;
     --primary-soft: rgba(46, 168, 132, .14);
-    --danger: #f85149; --danger-soft: rgba(248, 81, 73, .12); --danger-ink: #1a0d0c;
+    --danger: #F0603A; --danger-soft: rgba(240, 96, 58, .14); --danger-ink: #12100E;
     --success: #2ea884; --success-soft: rgba(46, 168, 132, .14);
-    --chart-1: #2ea884; --chart-3: #58a6ff; --chart-4: #f778ba; --chart-5: #39c5cf; --chart-6: #a371f7;
+    --chart-1: #2EA884; --chart-3: #8FC7B4; --chart-4: #F0603A; --chart-5: #B7C3BC; --chart-6: #5B6862;
   }
 }
 
@@ -127,15 +153,17 @@ body {
 }
 
 h1, h2, h3, h4 {
-  font-weight: 600;
-  line-height: 1.2;
-  letter-spacing: -0.01em;
+  font-weight: 700;
+  line-height: 1.15;
+  /* Tighter as the size grows: at 24px the default spacing makes a heading
+     look like it is drifting apart rather than holding together. */
+  letter-spacing: -0.025em;
   margin: 0 0 var(--space-3);
   color: var(--ink);
 }
-h1 { font-size: 24px; }
-h2 { font-size: 16px; }
-h3 { font-size: 15px; }
+h1 { font-size: 25px; }
+h2 { font-size: 16px; letter-spacing: -0.015em; }
+h3 { font-size: 15px; letter-spacing: -0.01em; }
 
 a { color: var(--primary); text-decoration: none; font-weight: 500; }
 a:hover { text-decoration: underline; }
@@ -147,7 +175,7 @@ button {
   font-family: var(--font-ui);
   background: var(--primary); color: var(--primary-ink); border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  padding: 9px 14px; cursor: pointer; font-size: 14px; font-weight: 500;
+  padding: 9px 14px; cursor: pointer; font-size: 14px; font-weight: 600;
   display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
   transition: background-color .15s var(--ease-out), color .15s var(--ease-out), border-color .15s var(--ease-out);
 }
@@ -191,7 +219,7 @@ input[type='checkbox'] { width: auto; accent-color: var(--primary); }
 input[type='file'] { padding: 7px 10px; font-size: 13px; color: var(--muted); }
 select { cursor: pointer; }
 
-label { font-size: 13px; color: var(--ink); display: block; margin: var(--space-4) 0 6px; font-weight: 500; }
+label { font-size: 13px; color: var(--ink); display: block; margin: var(--space-4) 0 6px; font-weight: 600; }
 label .optional { color: var(--faint); font-weight: 400; }
 
 .field-row { display: flex; gap: var(--space-2); align-items: flex-start; }
@@ -262,7 +290,7 @@ label .optional { color: var(--faint); font-weight: 400; }
 
 .sidebar {
   width: var(--sidebar-w); flex-shrink: 0; background: var(--surface);
-  border-right: 1px solid var(--border);
+  border-right: 1px solid var(--border-panel);
   padding: 20px 16px; display: flex; flex-direction: column; gap: var(--space-5);
   position: sticky; top: 0; height: 100vh;
 }
@@ -290,8 +318,20 @@ label .optional { color: var(--faint); font-weight: 400; }
 .sidebar .nav-btn:hover {
   background: var(--surface-2); color: var(--ink); text-decoration: none;
 }
+/* The active page is a solid block of the brand green, not a slightly darker
+   grey. A tint makes you compare two near-identical greys to find where you
+   are; a filled block answers it before you look — and in the brand colour it
+   also says which product you are in. */
 .sidebar nav a.active,
-.sidebar .sidebar-foot a.active { background: var(--surface-2); color: var(--ink); }
+.sidebar .sidebar-foot a.active {
+  background: var(--primary); color: var(--primary-ink); font-weight: 600;
+}
+.sidebar nav a.active:hover,
+.sidebar .sidebar-foot a.active:hover {
+  background: var(--primary-strong); color: var(--primary-ink);
+}
+/* the brand mark keeps its own colours — the logo is not part of the state */
+.sidebar nav a.active svg { color: currentColor; }
 .sidebar a svg, .sidebar .nav-btn svg { flex-shrink: 0; }
 .sidebar .whoami {
   padding: 8px 10px 10px; border-bottom: 1px solid var(--border); margin-bottom: 6px;
@@ -323,7 +363,7 @@ label .optional { color: var(--faint); font-weight: 400; }
 .page-subtitle { margin: 6px 0 0; font-size: 14px; color: var(--muted); }
 
 .card {
-  background: var(--surface); border: 1px solid var(--border);
+  background: var(--surface); border: 1px solid var(--border-panel);
   border-radius: var(--radius-md); padding: 20px;
 }
 .grid-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--space-4); }
@@ -390,7 +430,7 @@ label .optional { color: var(--faint); font-weight: 400; }
 /* ---- dashboard editor ---- */
 .editor-bar {
   display: flex; align-items: center; gap: var(--space-3);
-  padding: 16px 28px; background: var(--surface); border-bottom: 1px solid var(--border);
+  padding: 16px 28px; background: var(--surface); border-bottom: 1px solid var(--border-panel);
   position: sticky; top: 0; z-index: 20;
 }
 .editor-bar h1 { margin: 0; font-size: 18px; }
@@ -420,10 +460,11 @@ label .optional { color: var(--faint); font-weight: 400; }
 .editor-body { padding: var(--space-5) 28px; }
 
 .widget {
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--surface); border: 1px solid var(--border-panel);
+  border-radius: var(--radius-md);
   height: 100%; display: flex; flex-direction: column; overflow: hidden;
 }
-.widget:hover { border-color: var(--border-strong); }
+.widget:hover { border-color: var(--primary); }
 
 /* coloured cards — see widgetAccentVars in theme.js */
 .widget.has-bg { background: var(--widget-bg); border-color: var(--widget-border); }
@@ -453,9 +494,19 @@ label .optional { color: var(--faint); font-weight: 400; }
 .widget.bg-solid .markdown h4,
 .widget.bg-solid .markdown blockquote { color: var(--widget-muted); }
 .widget-header {
-  display: flex; align-items: center; gap: 8px; padding: 12px 16px;
-  font-size: 14px; font-weight: 500; color: var(--ink);
+  display: flex; align-items: center; gap: 8px; padding: 11px 16px;
+  font-size: 14px; font-weight: 600; color: var(--ink);
   border-bottom: 1px solid var(--border); cursor: grab;
+}
+/* A tracked-out mono caption. It stops competing with the number below it —
+   the title is a label for the figure, not a heading in its own right.
+   Sized at 12px rather than the mockup's 10.5px: uppercase and wide tracking
+   already cost legibility, and a canvas mockup is read at a different scale
+   than a real screen at arm's length. */
+.widget-header .title {
+  font-family: var(--font-mono); font-weight: 700;
+  font-size: 12px; letter-spacing: .11em; text-transform: uppercase;
+  color: var(--ink-2);
 }
 .widget-header:active { cursor: grabbing; }
 .widget-header .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -481,7 +532,9 @@ label .optional { color: var(--faint); font-weight: 400; }
 .data-badge-text { font-variant-numeric: tabular-nums; }
 
 .stat-value {
-  font-size: 28px; font-weight: 600; color: var(--ink); letter-spacing: -0.01em;
+  font-size: 40px; font-weight: 700; color: var(--ink); letter-spacing: -0.035em;
+  line-height: 1;
+  /* tabular figures so a number doesn't jiggle sideways as it refreshes */
   font-variant-numeric: tabular-nums;
 }
 .stat-wrap {
@@ -584,9 +637,21 @@ table.data tbody tr.selected:hover td { background: var(--primary-soft); }
 :root[data-theme='dark'] .stat-value.level-warn { color: var(--accent); }
 .status-pill.warn { background: rgba(183, 121, 31, .12); color: #b7791f; }
 :root[data-theme='dark'] .status-pill.warn { background: rgba(233, 180, 82, .14); color: var(--accent); }
-.stat-label { font-size: 13px; color: var(--muted); margin-bottom: var(--space-2); }
+.stat-label {
+  font-family: var(--font-mono); font-weight: 700;
+  font-size: 11.5px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: var(--space-2);
+}
 
 table.data { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.data th {
+  font-family: var(--font-mono); font-weight: 700;
+  /* 11.5px against 13px body text: still clearly subordinate, but a column
+     name you can read without leaning in. */
+  font-size: 11.5px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--ink-2);
+}
+table.data td.num, table.data .cell-bar-text { font-variant-numeric: tabular-nums; }
 table.data th, table.data td {
   text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border);
 }
@@ -691,74 +756,60 @@ table.data td.tone-muted { color: var(--muted); }
 :root[data-theme='dark'] table.data td.tone-blue { color: #93c5fd; background: rgba(147, 197, 253, .14); }
 :root[data-theme='dark'] table.data td.tone-purple { color: #c4b5fd; background: rgba(196, 181, 253, .14); }
 
-/* in-cell bar gauges — the fill sits behind the number rather than beside it,
-   so turning bars on never costs the table a column of width */
+/* In-cell bar gauges, drawn as a row of ticks rather than one solid block.
+   A solid fill invites you to read its exact length, which is a precision the
+   number beside it already gives more honestly. Ticks read as a rough level —
+   which is all a bar in a table is for — and the number stays outside it
+   instead of sitting on a coloured field that fights with the text.
+
+   Both track and fill use the same 5px repeat, so a filled tick lands exactly
+   on top of an empty one and the row never looks off by a pixel. */
 table.data .cell-bar {
-  position: relative;
-  display: block;
-  min-width: 46px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: var(--surface-2);
+  display: flex; align-items: center; gap: 9px; min-width: 92px;
+}
+table.data .cell-bar-track {
+  position: relative; flex: 1; min-width: 34px; height: 15px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
   overflow: hidden;
 }
+table.data .cell-bar-track::before {
+  content: ''; position: absolute; inset: 0;
+  background: repeating-linear-gradient(90deg,
+    var(--border) 0 3px, transparent 3px 5px);
+}
 table.data .cell-bar-fill {
-  position: absolute;
-  inset: 0 auto 0 0;
-  background: var(--primary);
-  opacity: .28;
-  border-radius: 4px;
+  position: absolute; inset: 0 auto 0 0;
+  background: repeating-linear-gradient(90deg,
+    var(--primary) 0 3px, transparent 3px 5px);
 }
-table.data .cell-bar-text { position: relative; }
-/* a coloured cell already carries the meaning; let the bar echo its tone */
-table.data .cell-bar-fill.tone-good { background: var(--success); }
-table.data .cell-bar-fill.tone-bad { background: var(--danger); }
+table.data .cell-bar-text {
+  flex-shrink: 0; font-variant-numeric: tabular-nums; text-align: right;
+}
+/* a coloured cell already carries the meaning; let the ticks echo its tone */
+table.data .cell-bar-fill.tone-good {
+  background: repeating-linear-gradient(90deg, var(--success) 0 3px, transparent 3px 5px);
+}
+table.data .cell-bar-fill.tone-bad {
+  background: repeating-linear-gradient(90deg, var(--danger) 0 3px, transparent 3px 5px);
+}
 table.data .cell-bar-fill.tone-warn,
-table.data .cell-bar-fill.tone-yellow { background: var(--accent); }
-table.data .cell-bar-fill.tone-orange { background: #fb923c; }
-table.data .cell-bar-fill.tone-blue { background: #60a5fa; }
-table.data .cell-bar-fill.tone-purple { background: #a78bfa; }
-table.data .cell-bar-fill.tone-muted { background: var(--muted); }
-
-/* ---- account page ---- */
-/* Change password and Two-factor sit side by side: they are the same kind of
-   thing — settings for your own sign-in — and stacking them pushed the second
-   below the fold where nobody found it. */
-.account-columns {
-  display: grid; gap: var(--space-5); margin-top: var(--space-5);
-  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-  align-items: start;
+table.data .cell-bar-fill.tone-yellow {
+  background: repeating-linear-gradient(90deg, var(--accent) 0 3px, transparent 3px 5px);
 }
-.totp-qr {
-  display: flex; justify-content: center;
-  background: #fff; border: 1px solid var(--border); border-radius: var(--radius-sm);
-  padding: var(--space-3); margin: var(--space-2) 0;
+table.data .cell-bar-fill.tone-orange {
+  background: repeating-linear-gradient(90deg, #E07B39 0 3px, transparent 3px 5px);
 }
-/* the generated SVG carries mm units; make it fit the card instead */
-.totp-qr svg { width: 190px; height: 190px; display: block; }
-
-/* ---- dashboard folders ---- */
-.folder-group + .folder-group { margin-top: var(--space-6); }
-.folder-heading {
-  display: flex; align-items: center; gap: 7px;
-  font-size: 13px; font-weight: 600; color: var(--muted);
-  text-transform: uppercase; letter-spacing: .04em;
-  margin: 0 0 var(--space-3);
+table.data .cell-bar-fill.tone-blue {
+  background: repeating-linear-gradient(90deg, #3D7EA6 0 3px, transparent 3px 5px);
 }
-.folder-count {
-  font-weight: 500; font-size: 11.5px; letter-spacing: 0;
-  background: var(--surface-2); color: var(--muted);
-  padding: 1px 7px; border-radius: 999px;
+table.data .cell-bar-fill.tone-purple {
+  background: repeating-linear-gradient(90deg, #7A6BAF 0 3px, transparent 3px 5px);
 }
-.dashboard-card .pinned { color: var(--accent); }
-.dashboard-card .pinned svg { fill: currentColor; }
-
-/* the dashboard you drilled down from, next to the back arrow */
-.crumb {
-  font-size: 12.5px; color: var(--muted); white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis; max-width: 220px;
+table.data .cell-bar-fill.tone-muted {
+  background: repeating-linear-gradient(90deg, var(--muted) 0 3px, transparent 3px 5px);
 }
-.crumb::after { content: '/'; margin-left: 7px; opacity: .5; }
 
 /* ---- text / markdown widget ---- */
 /* everything below sizes in em, so the font-size set on .markdown scales
@@ -897,6 +948,48 @@ button.status-pill.error { border: 0; cursor: pointer; }
   .field-grid { grid-template-columns: 1fr 1fr !important; }
 }
 .modal h3 { margin: 0 0 var(--space-2); font-size: 17px; }
+
+/* ---- widget preview (slide-in over the widget config modal) ---- */
+.preview-overlay {
+  position: fixed; inset: 0; z-index: var(--z-preview);
+  background: rgba(16, 24, 40, .45);
+  animation: overlay-in .18s var(--ease-out);
+}
+.preview-panel {
+  position: absolute; top: 0; right: 0; height: 100%;
+  width: min(920px, 96vw);
+  display: flex; flex-direction: column;
+  background: var(--surface); border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
+  animation: preview-slide-in .28s var(--ease-out);
+}
+@keyframes preview-slide-in {
+  from { transform: translateX(40px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+.preview-panel-head {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: 12px 16px; border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.preview-panel-title { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.preview-panel-meta {
+  font-size: 12px; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.preview-panel-body { flex: 1; min-height: 0; overflow: auto; padding: 16px; }
+.preview-panel-foot {
+  padding: 10px 16px; border-top: 1px solid var(--border); flex-shrink: 0;
+}
+/* widget cards render at full size inside the panel */
+.preview-panel-body .widget-preview-body {
+  height: 100%; min-height: 320px; background: transparent;
+}
+.widget-preview-error {
+  padding: 12px; font-size: 13px; color: var(--danger, #b3261e);
+  white-space: pre-wrap; word-break: break-word;
+}
+.widget-preview-hint { margin-top: var(--space-4); }
 
 /* --- sharing --- */
 .visibility-choice { display: flex; gap: var(--space-2); }

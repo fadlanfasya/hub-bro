@@ -40,14 +40,23 @@ export default function WidgetRenderer(props) {
 
 function WidgetData({
   widget, refreshKey, publicToken, onData, dashboardRange, dashboardId, readOnly,
-  selection, onSelect, initialSearch,
+  selection, onSelect, initialSearch, data: prefetched,
 }) {
-  const [result, setResult] = useState(null)
+  const [result, setResult] = useState(prefetched || null)
   const [error, setError] = useState('')
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(!prefetched)
   const [tick, setTick] = useState(0)
   const onDataRef = useRef(onData)
   useEffect(() => { onDataRef.current = onData }, [onData])
+
+  // A caller that supplies data (the config modal's live preview) has already
+  // paid for the fetch — don't fire the same query a second time.
+  useEffect(() => {
+    if (!prefetched) return
+    setResult(prefetched)
+    setError('')
+    setLoading(false)
+  }, [prefetched])
 
   // per-widget auto refresh
   const intervalSec = Number(widget.options?.refresh_seconds) || 0
@@ -58,6 +67,8 @@ function WidgetData({
   }, [intervalSec])
 
   useEffect(() => {
+    // the preview path: the caller fetched already, so skip the network
+    if (prefetched) return
     let cancelled = false
     setLoading(true)
     setError('')
@@ -270,8 +281,10 @@ function DataTable({ columns, rows, opts, selection, onSelect, dashboardId, init
                       .filter(Boolean).join(' ')}>
                     {fraction === null ? body : (
                       <span className="cell-bar">
-                        <span className={`cell-bar-fill${tone ? ` tone-${tone}` : ''}`}
-                          style={{ width: `${(fraction * 100).toFixed(2)}%` }} />
+                        <span className="cell-bar-track">
+                          <span className={`cell-bar-fill${tone ? ` tone-${tone}` : ''}`}
+                            style={{ width: `${(fraction * 100).toFixed(2)}%` }} />
+                        </span>
                         <span className="cell-bar-text">{body}</span>
                       </span>
                     )}

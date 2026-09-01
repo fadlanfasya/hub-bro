@@ -4,6 +4,8 @@ import {
 } from 'lucide-react'
 import { TONES } from '../tableRules'
 import { templateColumns } from '../links'
+import { Eye } from 'lucide-react'
+import WidgetPreviewModal from './WidgetPreviewModal'
 
 export default function WidgetConfigModal({
   widget, sources, onSave, onClose, dashboardList = [], currentDashboardId,
@@ -35,6 +37,7 @@ export default function WidgetConfigModal({
     (widget?.options?.unpivot?.columns || []).join(', ')
   )
   const [error, setError] = useState('')
+  const [showPreview, setShowPreview] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(
     Boolean(widget?.options?.group_by || widget?.options?.filters?.length
       || widget?.options?.sort || widget?.options?.unpivot)
@@ -1159,9 +1162,29 @@ export default function WidgetConfigModal({
         {error && <p className="error" role="alert">{error}</p>}
 
         <div className="modal-footer">
+          {type !== 'text' && (
+            <button type="button" className="secondary" style={{ marginRight: 'auto' }}
+              onClick={() => setShowPreview(true)}>
+              <Eye size={14} /> Live preview
+            </button>
+          )}
           <button type="button" className="secondary" onClick={onClose}>Cancel</button>
           <button type="submit">Save</button>
         </div>
+
+        {showPreview && (
+          <WidgetPreviewModal
+            widget={{
+              id: widget?.id || 'preview',
+              title,
+              type,
+              datasource_id: Number(datasourceId),
+              options: opts,
+            }}
+            sources={sources}
+            onClose={() => setShowPreview(false)}
+          />
+        )}
       </form>
     </div>
   )

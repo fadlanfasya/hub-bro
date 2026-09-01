@@ -223,7 +223,17 @@ async def fetch(config: dict, options: dict) -> dict:
         )
 
     dialect = (config.get("driver") or "postgresql").lower()
-    limit = min(int(options.get("limit") or DEFAULT_LIMIT), MAX_LIMIT)
+    # `max_rows` is what the widget form writes and what every other connector
+    # reads. This one only looked for `limit`, which is a *transform* option and
+    # so is stripped before a connector ever sees it — meaning the Max rows box
+    # did nothing here and every query fetched the 5000-row default. `limit` is
+    # still honoured second so older saved widgets keep working.
+    requested = options.get("max_rows") or options.get("limit")
+    try:
+        limit = int(requested) if requested else DEFAULT_LIMIT
+    except (TypeError, ValueError):
+        limit = DEFAULT_LIMIT
+    limit = min(max(1, limit), MAX_LIMIT)
     query, params, leftover = _wrap_with_filters(query, options.get("filters"), dialect)
 
     # SQLAlchemy is blocking, so keep the event loop free

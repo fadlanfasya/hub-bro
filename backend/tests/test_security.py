@@ -190,5 +190,40 @@ check("explicit dsn wins", build_url({"dsn": "postgresql://custom/db", "host": "
 raises("unknown driver rejected", lambda: build_url({"driver": "oracle", "host": "h"}), "unsupported")
 raises("missing host rejected", lambda: build_url({"driver": "postgresql", "database": "d"}), "host")
 
+
+print("Max rows reaches the database")
+# The form writes `max_rows`; this connector only read `limit`, which is a
+# transform option and never reaches a connector. So the box did nothing and
+# every query pulled the 5000-row default — the whole point of the setting is
+# that the *database* stops early, not that Python throws rows away afterwards.
+import asyncio as _asyncio            # noqa: E402
+import sqlite3 as _sqlite3            # noqa: E402
+import tempfile as _tempfile          # noqa: E402
+from app.connectors import sql_db as _sql_db   # noqa: E402
+
+_path = _tempfile.mktemp(suffix=".db")
+_con = _sqlite3.connect(_path)
+_con.execute("create table log (id integer, email text)")
+_con.executemany("insert into log values (?,?)",
+                 [(i, f"u{i}@x.com") for i in range(9000)])
+_con.commit()
+_con.close()
+_cfg = {"driver": "sqlite", "database": _path}
+
+
+def _rows(opts):
+    r = _asyncio.run(_sql_db.fetch(_cfg, {"query": "select * from log", **opts}))
+    return len(r["rows"])
+
+
+check("Max rows is honoured", _rows({"max_rows": "100"}), 100)
+check("as a number too", _rows({"max_rows": 250}), 250)
+check("the old limit option still works", _rows({"limit": 50}), 50)
+check("max_rows wins when both are set", _rows({"max_rows": 10, "limit": 9000}), 10)
+check("nothing set falls back to the default", _rows({}), _sql_db.DEFAULT_LIMIT)
+check("nonsense doesn't crash the query", _rows({"max_rows": "abc"}), _sql_db.DEFAULT_LIMIT)
+check("and it can't be raised past the hard cap",
+      _rows({"max_rows": 999999}) <= _sql_db.MAX_LIMIT, True)
+os.unlink(_path)
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
