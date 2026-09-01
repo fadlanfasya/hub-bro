@@ -5,8 +5,10 @@ import {
   normaliseHex, resolveTheme,
 } from '../theme'
 import { useTheme } from '../useTheme'
+import { useModalMotion } from '../useModalMotion'
 
 export default function ThemeModal({ theme, onChange, onClose }) {
+  const { overlayRef, boxRef, requestClose } = useModalMotion(onClose)
   const [mode] = useTheme()
   const [draft, setDraft] = useState(theme || { preset: DEFAULT_PRESET })
   const isDark = mode === 'dark'
@@ -23,15 +25,15 @@ export default function ThemeModal({ theme, onChange, onClose }) {
 
   const apply = () => {
     onChange(isDefaultTheme(draft) ? undefined : draft)
-    onClose()
+    requestClose()
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="card modal narrow" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay" ref={overlayRef} style={{ animation: 'none' }} onClick={requestClose}>
+      <div className="card modal narrow" ref={boxRef} style={{ animation: 'none' }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <h3 style={{ margin: 0, flex: 1 }}>Dashboard theme</h3>
-          <button className="ghost icon" aria-label="Close" onClick={onClose}><X size={16} /></button>
+          <button className="ghost icon" aria-label="Close" onClick={requestClose}><X size={16} /></button>
         </div>
         <p className="muted" style={{ marginTop: 4 }}>
           Applies to this dashboard only, including its share and kiosk links.
@@ -110,7 +112,7 @@ export default function ThemeModal({ theme, onChange, onClose }) {
               <RotateCcw size={14} /> Reset
             </button>
           )}
-          <button className="secondary" onClick={onClose}>Cancel</button>
+          <button className="secondary" onClick={requestClose}>Cancel</button>
           <button onClick={apply}>Apply theme</button>
         </div>
       </div>

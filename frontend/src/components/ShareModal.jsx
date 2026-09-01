@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { X, Copy, Check, Monitor, Link2, AlertTriangle } from 'lucide-react'
 import { dashboards } from '../api'
+import { useModalMotion } from '../useModalMotion'
 
 export default function ShareModal({ dashboard, onChange, onClose }) {
+  const { overlayRef, boxRef, requestClose } = useModalMotion(onClose)
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState('')
   const token = dashboard.share_token
@@ -32,11 +34,11 @@ export default function ShareModal({ dashboard, onChange, onClose }) {
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="card modal narrow" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay" ref={overlayRef} style={{ animation: 'none' }} onClick={requestClose}>
+      <div className="card modal narrow" ref={boxRef} style={{ animation: 'none' }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <h3 style={{ margin: 0, flex: 1 }}>Share “{dashboard.name}”</h3>
-          <button className="ghost icon" aria-label="Close" onClick={onClose}><X size={16} /></button>
+          <button className="ghost icon" aria-label="Close" onClick={requestClose}><X size={16} /></button>
         </div>
 
         {!token ? (
@@ -50,7 +52,7 @@ export default function ShareModal({ dashboard, onChange, onClose }) {
               <span>Anyone with the link can view it, so treat it as public.</span>
             </div>
             <div className="modal-footer">
-              <button className="secondary" onClick={onClose}>Cancel</button>
+              <button className="secondary" onClick={requestClose}>Cancel</button>
               <button onClick={enable} disabled={busy}>
                 <Link2 size={14} /> Create link
               </button>
@@ -84,7 +86,7 @@ export default function ShareModal({ dashboard, onChange, onClose }) {
               <a href={kioskUrl} target="_blank" rel="noreferrer">
                 <button type="button" className="secondary"><Monitor size={14} /> Open kiosk view</button>
               </a>
-              <button onClick={onClose}>Done</button>
+              <button onClick={requestClose}>Done</button>
             </div>
           </>
         )}

@@ -6,6 +6,7 @@ import { TONES } from '../tableRules'
 import { templateColumns } from '../links'
 import { Eye } from 'lucide-react'
 import WidgetPreviewModal from './WidgetPreviewModal'
+import { useModalMotion } from '../useModalMotion'
 
 export default function WidgetConfigModal({
   widget, sources, onSave, onClose, dashboardList = [], currentDashboardId,
@@ -13,6 +14,7 @@ export default function WidgetConfigModal({
   // form flag a mistyped {placeholder} instead of leaving it to the dashboard
   availableColumns = [],
 }) {
+  const { overlayRef, boxRef, requestClose } = useModalMotion(onClose)
   const [title, setTitle] = useState(widget?.title || '')
   const [type, setType] = useState(widget?.type || 'line')
   const [datasourceId, setDatasourceId] = useState(widget?.datasource_id || sources[0]?.id || '')
@@ -173,21 +175,21 @@ export default function WidgetConfigModal({
     if (cleanRules.length) opts.color_rules = cleanRules
     else delete opts.color_rules
 
-    onSave({
+    requestClose(() => onSave({
       id: widget?.id || `w${Date.now()}`,
       title: title || 'Untitled',
       type,
       datasource_id: type === 'text' ? null : Number(datasourceId),
       options: opts,
-    })
+    }))
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <form className="card modal" onClick={(e) => e.stopPropagation()} onSubmit={save}>
+    <div className="modal-overlay" ref={overlayRef} style={{ animation: 'none' }} onClick={requestClose}>
+      <form className="card modal" ref={boxRef} style={{ animation: 'none' }} onClick={(e) => e.stopPropagation()} onSubmit={save}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <h3 style={{ margin: 0, flex: 1 }}>{widget ? 'Edit widget' : 'Add widget'}</h3>
-          <button type="button" className="ghost icon" aria-label="Close" onClick={onClose}>
+          <button type="button" className="ghost icon" aria-label="Close" onClick={requestClose}>
             <X size={16} />
           </button>
         </div>
@@ -1168,7 +1170,7 @@ export default function WidgetConfigModal({
               <Eye size={14} /> Live preview
             </button>
           )}
-          <button type="button" className="secondary" onClick={onClose}>Cancel</button>
+          <button type="button" className="secondary" onClick={requestClose}>Cancel</button>
           <button type="submit">Save</button>
         </div>
 

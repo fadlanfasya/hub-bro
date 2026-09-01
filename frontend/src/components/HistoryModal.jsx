@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { X, RotateCcw, History, Loader2, AlertCircle, User } from 'lucide-react'
 import { dashboards } from '../api'
+import { useModalMotion } from '../useModalMotion'
 
 /** Relative time that stays readable without pulling in a date library. */
 function timeAgo(iso) {
@@ -25,6 +26,7 @@ function timeAgo(iso) {
 }
 
 export default function HistoryModal({ dashboardId, onRestored, onClose }) {
+  const { overlayRef, boxRef, requestClose } = useModalMotion(onClose)
   const [items, setItems] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(null)
@@ -43,7 +45,7 @@ export default function HistoryModal({ dashboardId, onRestored, onClose }) {
     try {
       const res = await dashboards.restore(dashboardId, snapshot.id)
       onRestored(res.data)
-      onClose()
+      requestClose()
     } catch (err) {
       setError(err.response?.data?.detail || 'Restore failed')
       setBusy(null)
@@ -51,14 +53,14 @@ export default function HistoryModal({ dashboardId, onRestored, onClose }) {
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="card modal" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay" ref={overlayRef} style={{ animation: 'none' }} onClick={requestClose}>
+      <div className="card modal" ref={boxRef} style={{ animation: 'none' }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <h3 style={{ margin: 0, flex: 1 }}>
             <History size={16} style={{ verticalAlign: '-3px', marginRight: 6 }} />
             Version history
           </h3>
-          <button className="ghost icon" aria-label="Close" onClick={onClose}><X size={16} /></button>
+          <button className="ghost icon" aria-label="Close" onClick={requestClose}><X size={16} /></button>
         </div>
         <p className="muted" style={{ marginTop: 4 }}>
           A copy is kept before every change. Restoring is itself undoable.
@@ -101,7 +103,7 @@ export default function HistoryModal({ dashboardId, onRestored, onClose }) {
         )}
 
         <div className="modal-footer">
-          <button className="secondary" onClick={onClose}>Close</button>
+          <button className="secondary" onClick={requestClose}>Close</button>
         </div>
       </div>
     </div>

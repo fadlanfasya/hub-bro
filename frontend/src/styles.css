@@ -521,6 +521,10 @@ label .optional { color: var(--faint); font-weight: 400; }
 .widget-body { flex: 1; padding: var(--space-4); overflow: auto; min-height: 0; }
 .widget-body.flush { padding: var(--space-3); }
 
+/* lazy-load wrapper: keeps the 100%-height chain intact so ResponsiveContainer
+   and .stat-wrap still fill the widget once their content mounts */
+.widget-lazy { height: 100%; }
+
 /* truncated / stale warning, shown in the header so it costs no body height */
 .data-badge {
   display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;
@@ -810,6 +814,66 @@ table.data .cell-bar-fill.tone-purple {
 table.data .cell-bar-fill.tone-muted {
   background: repeating-linear-gradient(90deg, var(--muted) 0 3px, transparent 3px 5px);
 }
+
+/* ---- account page ---- */
+/* Change password and Two-factor sit side by side: they are the same kind of
+   thing — settings for your own sign-in — and stacking them pushed the second
+   below the fold where nobody found it. */
+.account-columns {
+  display: grid; gap: var(--space-5); margin-top: var(--space-5);
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  align-items: start;
+}
+.totp-qr {
+  display: flex; justify-content: center;
+  background: #fff; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: var(--space-3); margin: var(--space-2) 0;
+}
+/* the generated SVG carries mm units; make it fit the card instead */
+.totp-qr svg { width: 190px; height: 190px; display: block; }
+
+/* ---- dashboard folders ---- */
+.folder-group + .folder-group { margin-top: var(--space-6); }
+.folder-heading {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono); font-weight: 700;
+  font-size: 11.5px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 var(--space-3);
+  /* a rule running to the edge, so the group reads as a band rather than a
+     line of text floating above some cards */
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+.folder-heading svg { flex-shrink: 0; color: var(--faint); }
+.folder-count {
+  margin-left: auto; font-weight: 500; font-size: 11px; letter-spacing: 0;
+  background: var(--surface-2); color: var(--muted);
+  padding: 2px 8px; border-radius: var(--radius-pill);
+}
+.dashboard-card .pinned { color: var(--accent); }
+.dashboard-card .pinned svg { fill: currentColor; }
+
+/* the dashboard you drilled down from, next to the back arrow */
+.crumb {
+  font-size: 12.5px; color: var(--muted); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; max-width: 220px;
+}
+.crumb::after { content: '/'; margin-left: 7px; opacity: .5; }
+
+/* Three classes the markup has always used without a rule to match. Harmless
+   until you notice "failed" rendering in ordinary body colour on a page whose
+   whole job is telling you something failed. */
+.danger-text { color: var(--danger); font-weight: 600; }
+.mini-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.mini-table th, .mini-table td {
+  text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border);
+}
+.mini-table th {
+  font-family: var(--font-mono); font-weight: 700; font-size: 10.5px;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+}
+.mini-table tr:last-child td { border-bottom: 0; }
 
 /* ---- text / markdown widget ---- */
 /* everything below sizes in em, so the font-size set on .markdown scales

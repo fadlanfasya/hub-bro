@@ -100,24 +100,26 @@ describe('WidgetPreviewModal', () => {
     expect(screen.getByText('Select a data source in the widget form first.')).toBeTruthy()
   })
 
-  it('closing via overlay click calls onClose', async () => {
+  // Closing now plays an exit tween before onClose fires — see useModalMotion —
+  // so these wait out the close animation rather than a single microtask.
+  it('closing via overlay click calls onClose once the close animation finishes', async () => {
     const onClose = vi.fn()
     render(<WidgetPreviewModal widget={sqlWidget} sources={sources} onClose={onClose} />)
     await settle()
     await act(async () => {
       document.querySelector('.preview-overlay').dispatchEvent(new MouseEvent('click', { bubbles: true }))
-      await Promise.resolve()
+      await new Promise((r) => setTimeout(r, 300))
     })
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it('Escape calls onClose', async () => {
+  it('Escape calls onClose once the close animation finishes', async () => {
     const onClose = vi.fn()
     render(<WidgetPreviewModal widget={sqlWidget} sources={sources} onClose={onClose} />)
     await settle()
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
-      await Promise.resolve()
+      await new Promise((r) => setTimeout(r, 300))
     })
     expect(onClose).toHaveBeenCalledTimes(1)
   })

@@ -3,6 +3,7 @@ import { Eye, RefreshCw, X } from 'lucide-react'
 import { data as dataApi } from '../api'
 import { buildOptions } from '../widgetData'
 import WidgetRenderer from './WidgetRenderer'
+import { useModalMotion } from '../useModalMotion'
 
 /**
  * Dedicated large preview for the widget being configured.
@@ -14,6 +15,7 @@ import WidgetRenderer from './WidgetRenderer'
  * previews are picked up on the next open.
  */
 export default function WidgetPreviewModal({ widget, sources, onClose }) {
+  const { overlayRef, boxRef, requestClose } = useModalMotion(onClose, 'slide')
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -55,10 +57,10 @@ export default function WidgetPreviewModal({ widget, sources, onClose }) {
 
   // Escape closes; nothing else — the config modal underneath stays untouched.
   useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') onClose() }
+    const onKey = (e) => { if (e.key === 'Escape') requestClose() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [requestClose])
 
   let body
   if (!source) {
@@ -74,9 +76,11 @@ export default function WidgetPreviewModal({ widget, sources, onClose }) {
   }
 
   return (
-    <div className="preview-overlay" onClick={onClose}>
+    <div className="preview-overlay" ref={overlayRef} style={{ animation: 'none' }} onClick={requestClose}>
       <section
         className="preview-panel"
+        ref={boxRef}
+        style={{ animation: 'none' }}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -96,7 +100,7 @@ export default function WidgetPreviewModal({ widget, sources, onClose }) {
               <RefreshCw size={13} /> Refresh
             </button>
           )}
-          <button type="button" className="ghost icon" aria-label="Close preview" onClick={onClose}>
+          <button type="button" className="ghost icon" aria-label="Close preview" onClick={requestClose}>
             <X size={16} />
           </button>
         </header>

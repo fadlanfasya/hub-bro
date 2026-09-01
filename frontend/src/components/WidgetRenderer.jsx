@@ -4,6 +4,8 @@ import {
   ResponsiveContainer, Legend,
 } from 'recharts'
 import { Link } from 'react-router-dom'
+import gsap from 'gsap'
+import { useGSAP } from '@gsap/react'
 import { AlertCircle, TrendingUp, TrendingDown, Minus, Search, ExternalLink } from 'lucide-react'
 import { buildLinkUrl, linkProps, withOrigin } from '../links'
 import { data as dataApi, publicApi } from '../api'
@@ -26,16 +28,49 @@ import { canEmitSelection, crossFiltersFor, isSelected } from '../selection'
 
 const COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--chart-6)']
 
+gsap.registerPlugin(useGSAP)
+
 export default function WidgetRenderer(props) {
   const { widget } = props
   // a text widget has no data source, so it never touches the fetch machinery
   if (widget.type === 'text') {
     return (
-      <Markdown source={widget.options?.text} size={widget.options?.font_size}
-        align={widget.options?.align} valign={widget.options?.valign} />
+      <LazyReveal>
+        <Markdown source={widget.options?.text} size={widget.options?.font_size}
+          align={widget.options?.align} valign={widget.options?.valign} />
+      </LazyReveal>
     )
   }
-  return <WidgetData {...props} />
+  return <LazyReveal><WidgetData {...props} /></LazyReveal>
+}
+
+/**
+ * Defers mounting its children — and so the network fetch a widget triggers
+ * on mount — until the widget scrolls near the viewport, then fades the
+ * result in. `IntersectionObserver` is absent in the test/jsdom environment,
+ * so there children render immediately rather than staying hidden forever.
+ */
+function LazyReveal({ children }) {
+  const containerRef = useRef(null)
+  const [visible, setVisible] = useState(typeof IntersectionObserver === 'undefined')
+
+  useEffect(() => {
+    if (visible) return
+    const el = containerRef.current
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) setVisible(true) },
+      { rootMargin: '200px' }
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [visible])
+
+  useGSAP(() => {
+    if (!visible) return
+    gsap.from(containerRef.current, { autoAlpha: 0, y: 6, duration: 0.35, ease: 'power2.out' })
+  }, { dependencies: [visible], scope: containerRef })
+
+  return <div ref={containerRef} className="widget-lazy">{visible && children}</div>
 }
 
 function WidgetData({
