@@ -107,13 +107,15 @@ export default function Gauge({
             className="gauge-label" fill="var(--muted)">{label}</text>
         )}
 
-        {/* scale ends, below the arc so they never sit on top of it */}
+        {/* scale ends, below the arc so they never sit on top of it.
+            --muted, not --faint: this is real information (the gauge's
+            range), and --faint fails AA contrast for text. */}
         <text x={startPoint.x} y={VIEW_H - 6} textAnchor="middle"
-          className="gauge-bound" fill="var(--faint)">
+          className="gauge-bound" fill="var(--muted)">
           {formatStatValue(lo, { compact: format.compact })}
         </text>
         <text x={endPoint.x} y={VIEW_H - 6} textAnchor="middle"
-          className="gauge-bound" fill="var(--faint)">
+          className="gauge-bound" fill="var(--muted)">
           {formatStatValue(hi, { compact: format.compact })}
         </text>
       </svg>

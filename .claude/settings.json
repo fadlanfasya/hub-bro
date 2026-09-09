@@ -1,6 +1,7 @@
 {
   "enabledPlugins": {
     "gsap-skills@gsap-skills": true,
-    "genjutsu@genjutsu": true
+    "genjutsu@genjutsu": true,
+    "impeccable@impeccable": true
   }
 }

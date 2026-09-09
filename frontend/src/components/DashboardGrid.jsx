@@ -3,6 +3,16 @@ import { createPortal } from 'react-dom'
 import { GridStack } from 'gridstack'
 import 'gridstack/dist/gridstack.css'
 
+// Phones: the grid collapses to one full-width column and goes static (no
+// drag/resize). Reordering a 12-column grid with a thumb is a poor
+// experience anyway, and it matters more here: save() reads whatever the
+// engine's *current* column layout is, so if drag/resize stayed live at this
+// width, finishing a drag would persist the single-column stack over the
+// real desktop layout. Going static avoids that risk entirely. GridStack
+// caches the pre-collapse layout internally, so widening back out restores
+// the original desktop/kiosk positions rather than recomputing them.
+const MOBILE_BREAKPOINT = 640
+
 /**
  * Dashboard grid built on gridstack.
  *
@@ -51,6 +61,10 @@ export default function DashboardGrid({
       staticGrid: readOnly,
       alwaysShowResizeHandle: 'mobile',
       resizable: { handles: 'se, sw, ne, nw, e, w, s, n' },
+      columnOpts: {
+        breakpointForWindow: true,
+        breakpoints: [{ w: MOBILE_BREAKPOINT, c: 1, layout: 'list' }],
+      },
     }, containerRef.current)
 
     gridRef.current = grid
@@ -81,6 +95,17 @@ export default function DashboardGrid({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // --- phone width: go static, on top of whatever readOnly already set ---
+  useEffect(() => {
+    // matchMedia is unimplemented in the jsdom test environment
+    if (typeof window.matchMedia !== 'function') return
+    const mq = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`)
+    const apply = () => gridRef.current?.setStatic(readOnly || mq.matches)
+    apply()
+    mq.addEventListener('change', apply)
+    return () => mq.removeEventListener('change', apply)
+  }, [readOnly])
 
   // --- add / remove items to match props ---
   useLayoutEffect(() => {

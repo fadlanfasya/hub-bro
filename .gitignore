@@ -6,3 +6,4 @@ backend/hubbro.db
 backend/uploads/
 node_modules/
 dist/
+mockups/

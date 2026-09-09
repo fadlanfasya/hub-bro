@@ -26,7 +26,7 @@ export function useModalMotion(onClose, variant = 'fade') {
   const closingRef = useRef(false)
   const spec = VARIANTS[variant]
 
-  useGSAP(() => {
+  const { contextSafe } = useGSAP(() => {
     if (prefersReducedMotion()) return
     gsap.fromTo(overlayRef.current, { opacity: 0 }, { opacity: 1, duration: 0.18, ease: EASE })
     gsap.fromTo(boxRef.current, spec.from, { ...spec.to, duration: spec.enterDuration, ease: EASE })
@@ -37,14 +37,20 @@ export function useModalMotion(onClose, variant = 'fade') {
   // defaulted — requestClose is wired straight up as onClick in most callers,
   // and a bare `after = onClose` default would silently take the DOM click
   // event as `after` instead, since React passes it as the first argument.
-  const requestClose = (after) => {
+  //
+  // Wrapped in contextSafe: it's called from click handlers, which run after
+  // useGSAP's own callback already returned, so its tweens aren't tracked by
+  // the GSAP context by default and wouldn't auto-kill if the modal were ever
+  // removed through some other path mid-close (leaving a tween animating a
+  // detached node, then calling a stale onClose/onSave).
+  const requestClose = contextSafe((after) => {
     const done = typeof after === 'function' ? after : onClose
     if (closingRef.current) return
     closingRef.current = true
     if (prefersReducedMotion()) { done(); return }
     gsap.to(overlayRef.current, { opacity: 0, duration: 0.18, ease: EASE })
     gsap.to(boxRef.current, { ...spec.from, duration: spec.exitDuration, ease: EASE, onComplete: done })
-  }
+  })
 
   return { overlayRef, boxRef, requestClose }
 }

@@ -52,26 +52,26 @@ function Sidebar() {
       </div>
 
       <nav>
-        <NavLink to="/" end className={navClass} title="Dashboards">
+        <NavLink to="/" end className={navClass} title="Dashboards" aria-label="Dashboards">
           <LayoutDashboard size={16} />{!rail && <span>Dashboards</span>}
         </NavLink>
         {can('datasource.manage') && (
-          <NavLink to="/datasources" className={navClass} title="Data sources">
+          <NavLink to="/datasources" className={navClass} title="Data sources" aria-label="Data sources">
             <Database size={16} />{!rail && <span>Data sources</span>}
           </NavLink>
         )}
         {can('datasource.health') && (
-          <NavLink to="/health" className={navClass} title="Source health">
+          <NavLink to="/health" className={navClass} title="Source health" aria-label="Source health">
             <Activity size={16} />{!rail && <span>Health</span>}
           </NavLink>
         )}
         {can('alert.view') && (
-          <NavLink to="/alerts" className={navClass} title="Alerts">
+          <NavLink to="/alerts" className={navClass} title="Alerts" aria-label="Alerts">
             <Bell size={16} />{!rail && <span>Alerts</span>}
           </NavLink>
         )}
         {can('user.manage') && (
-          <NavLink to="/users" className={navClass} title="Users">
+          <NavLink to="/users" className={navClass} title="Users" aria-label="Users">
             <UsersIcon size={16} />{!rail && <span>Users</span>}
           </NavLink>
         )}
@@ -84,15 +84,16 @@ function Sidebar() {
             <div className="whoami-role">{ROLE_LABELS[user.role] || user.role}</div>
           </div>
         )}
-        <NavLink to="/account" className={navClass} title="Account">
+        <NavLink to="/account" className={navClass} title="Account" aria-label="Account">
           <UserCircle size={16} />{!rail && <span>Account</span>}
         </NavLink>
         <button className="nav-btn" onClick={toggleTheme}
-          title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
+          title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+          aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
           {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
           {!rail && <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>}
         </button>
-        <button className="nav-btn" onClick={signOut} title="Log out">
+        <button className="nav-btn" onClick={signOut} title="Log out" aria-label="Log out">
           <LogOut size={16} />{!rail && <span>Log out</span>}
         </button>
       </div>
