@@ -106,6 +106,22 @@ export function computeStat(rows, columns, opts = {}) {
   else if (agg === 'avg') value = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : '—'
   else value = nums.length ? nums[nums.length - 1] : rows[rows.length - 1][field]
 
+  // Express the value as a share of another column on the same row. The pair
+  // has to come from one fetch — reading "245 protected" and "278 agents" from
+  // two widgets means two requests that can disagree, and a percentage built
+  // from disagreeing halves is worse than no percentage.
+  if (opts.percent_of && opts.percent_of !== field && typeof value === 'number') {
+    const totals = rows.map((r) => r[opts.percent_of]).filter((v) => typeof v === 'number')
+    const total = agg === 'sum' || agg === 'count'
+      ? totals.reduce((a, b) => a + b, 0)
+      : totals[totals.length - 1]
+    // A zero denominator is not 0% and not Infinity; there is simply nothing to
+    // take a share of, so say so rather than printing a made-up number.
+    if (!totals.length || !total) return { field, value: '—' }
+    value = (value / total) * 100
+    return { field, value: Math.round(value * 10) / 10, percent: true }
+  }
+
   if (typeof value === 'number') value = Math.round(value * 100) / 100
   return { field, value }
 }

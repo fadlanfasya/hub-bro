@@ -36,6 +36,40 @@ _DATE_FORMATS = (
 )
 
 
+def _parse_epoch(value) -> datetime | None:
+    """Read a Unix timestamp, in seconds or milliseconds, or return None.
+
+    Cortex XDR times every field in epoch milliseconds, and Prometheus reports
+    seconds, so without this a date_diff on those columns silently produces an
+    empty column rather than an error.
+
+    The magnitude decides the unit, and the range is deliberately narrow: a bare
+    2026 is a year, and 20260909 is a packed date, so neither should be read as
+    a time. Only 1e9 and above — 2001 onwards in seconds — is treated as epoch.
+    """
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        if not (text.isdigit() or (text[:1] == "-" and text[1:].isdigit())):
+            return None
+        value = int(text)
+    if not isinstance(value, (int, float)):
+        return None
+
+    magnitude = abs(value)
+    if magnitude >= 1e11:        # milliseconds (1973 onwards)
+        seconds = value / 1000.0
+    elif magnitude >= 1e9:       # seconds (2001 onwards)
+        seconds = float(value)
+    else:
+        return None
+    try:
+        return datetime.fromtimestamp(seconds, tz=timezone.utc).replace(tzinfo=None)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
 def parse_date(value) -> datetime | None:
     """Best-effort date parsing. Returns naive UTC, or None when unusable.
 
@@ -48,6 +82,10 @@ def parse_date(value) -> datetime | None:
     if isinstance(value, datetime):
         return value.replace(tzinfo=None) if value.tzinfo is None else \
             value.astimezone(timezone.utc).replace(tzinfo=None)
+
+    epoch = _parse_epoch(value)
+    if epoch is not None:
+        return epoch
 
     text = str(value).strip()
     if not text or text.startswith("0000-00-00"):
@@ -94,8 +132,15 @@ def add_months(when: datetime, months) -> datetime | None:
 
 
 def _is_date_only(value) -> bool:
-    """True for "2025-10-16" but not "2024-10-23 02:31:42"."""
+    """True for "2025-10-16" but not "2024-10-23 02:31:42".
+
+    An epoch timestamp also has no space and no "T", but it does carry a time of
+    day. Reading it as date-only rounds every age up to the next whole calendar
+    day, so it has to be excluded explicitly.
+    """
     if isinstance(value, datetime):
+        return False
+    if _parse_epoch(value) is not None:
         return False
     text = str(value or "").strip()
     return bool(text) and " " not in text and "T" not in text
@@ -188,6 +233,41 @@ def apply_date_diff(rows: list, columns: list, specs, now: datetime | None = Non
     return rows, columns
 
 
+def _bucket_matches(bucket: dict, raw, value: float | None) -> bool:
+    """Does one row fall in one bucket?
+
+    Two kinds of bucket, told apart by which keys are present:
+      {"as": "soon", "min": 0, "max": 60}          numeric range, bounds inclusive
+      {"as": "protected", "equals": "PROTECTED"}   text match, or a list of them
+
+    The text form exists because a status column is the most common thing worth
+    counting onto a single tile, and it is not a number — "245 protected, 32
+    partial, 1 unprotected" was impossible to express before.
+    """
+    # An empty box in the form arrives as "", which must not be read as "match
+    # rows whose status is blank" — that is what unknown_as is for.
+    if bucket.get("equals") not in (None, "", []):
+        wanted = bucket["equals"]
+        if isinstance(wanted, str):
+            # The form gives one text box, so a set of values has to arrive as
+            # "LOST, DISCONNECTED" — the same comma convention the `in` filter
+            # operator already uses.
+            wanted = [v.strip() for v in wanted.split(",") if v.strip()]
+        elif not isinstance(wanted, list):
+            wanted = [wanted]
+        actual = str(raw if raw is not None else "").strip().lower()
+        return any(actual == str(w).strip().lower() for w in wanted)
+
+    if value is None:
+        return False
+    lo, hi = _num(bucket.get("min")), _num(bucket.get("max"))
+    if lo is not None and value < lo:
+        return False
+    if hi is not None and value > hi:
+        return False
+    return True
+
+
 def apply_count_by(rows: list, columns: list, spec: dict):
     """Collapse rows into ONE row holding a count per bucket.
 
@@ -204,9 +284,10 @@ def apply_count_by(rows: list, columns: list, spec: dict):
     headline read one of them and the supporting line read the rest — all from
     a single fetch, so the numbers cannot disagree.
 
-    Bounds are inclusive. Rows whose value is missing or non-numeric are
-    counted in `unknown` when a bucket asks for it, and otherwise ignored —
-    a contract with no dates is not "expired".
+    Buckets match either a numeric range or a text value — see _bucket_matches.
+    Bounds are inclusive. Rows no bucket claims are counted in `unknown` when a
+    bucket asks for it, and otherwise ignored: a contract with no dates is not
+    "expired". `total_as` adds the row count, which is what a percentage needs.
     """
     if not spec or not spec.get("column"):
         return rows, columns
@@ -228,19 +309,19 @@ def apply_count_by(rows: list, columns: list, spec: dict):
         names.append(unknown_name)
 
     for row in rows:
-        value = _num(row.get(source))
-        if value is None:
-            if unknown_name:
-                out[unknown_name] += 1
-            continue
+        raw = row.get(source)
+        value = _num(raw)
         for b in buckets:
-            lo, hi = _num(b.get("min")), _num(b.get("max"))
-            if lo is not None and value < lo:
-                continue
-            if hi is not None and value > hi:
+            if not _bucket_matches(b, raw, value):
                 continue
             out[b.get("as") or "bucket"] += 1
             break          # first matching bucket wins, so totals never double count
+        else:
+            # Nothing claimed the row. A missing date is not "expired", and an
+            # unrecognised status is not any of the named ones, so it is only
+            # counted when the widget asked for an explicit catch-all.
+            if unknown_name:
+                out[unknown_name] += 1
 
     if spec.get("total_as"):
         out[spec["total_as"]] = len(rows)

@@ -10,6 +10,8 @@ config: {url, method?, headers?, body?, verify_ssl?}
 options: {data_path?, rename?}
   - data_path: dot-path to the array of records, e.g. "data.items". Empty = root.
   - rename: {"old_key": "New label"} applied to columns after normalization.
+
+Values that are not scalars get flattened — see flatten_value.
 """
 import json as jsonlib
 
@@ -32,6 +34,26 @@ def _resolve_path(data, path: str):
     return data
 
 
+def flatten_value(value):
+    """Reduce one JSON value to something a table cell can hold.
+
+    A list of scalars becomes "a, b" rather than Python's repr "['a', 'b']".
+    That is what a reader expects to see in a cell, and it is also splittable
+    later — Cortex XDR returns MITRE tactics, host lists and IP addresses this
+    way, and repr quoting would have to be stripped before any of it is usable.
+    Anything deeper (a list of objects, a nested dict) still falls back to str:
+    it has no honest one-cell form, and silently dropping it would be worse.
+    """
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, list):
+        if not value:
+            return None
+        if all(isinstance(v, (str, int, float)) and not isinstance(v, bool) for v in value):
+            return ", ".join(str(v) for v in value)
+    return str(value)
+
+
 def normalize(records) -> dict:
     """Turn arbitrary JSON into {columns, rows}."""
     if records is None:
@@ -46,8 +68,7 @@ def normalize(records) -> dict:
     columns: list[str] = []
     for item in records:
         if isinstance(item, dict):
-            flat = {k: (v if isinstance(v, (str, int, float, bool)) or v is None else str(v))
-                    for k, v in item.items()}
+            flat = {k: flatten_value(v) for k, v in item.items()}
         else:
             flat = {"value": item}
         for k in flat:

@@ -365,8 +365,14 @@ function WidgetPlot({ widget, result, selection, onSelect, dashboardId, initialS
   }
 
   if (widget.type === 'stat') {
-    const { field, value } = computeStat(rows, columns, opts)
-    const display = formatStatValue(value, opts)
+    const { field, value, percent } = computeStat(rows, columns, opts)
+    // A percentage carries its own unit and needs a decimal to be useful:
+    // "88%" hides the difference between 87.6 and 88.4. An explicit setting
+    // still wins, so a widget can ask for a whole number.
+    const display = formatStatValue(
+      value,
+      percent ? { ...opts, decimals: opts.decimals ?? 1, suffix: opts.suffix || '%' } : opts,
+    )
     const level = evaluateThreshold(value, opts.thresholds)
     const reason = describeThreshold(display, opts.thresholds, level)
     const label = opts.label ?? `${field}${opts.aggregate ? ` · ${opts.aggregate}` : ''}`

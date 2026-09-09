@@ -80,6 +80,67 @@ describe('computeStat', () => {
     const r = [{ a: 1, b: 99 }]
     expect(computeStat(r, ['a', 'b'], { value_field: 'b' })).toEqual({ field: 'b', value: 99 })
   })
+
+  describe('percent_of', () => {
+    // The shape "count into buckets" produces: one row, a column per bucket
+    // plus the total. 245 of 278 agents protected.
+    const summary = [{ protected: 245, partial: 32, unprotected: 1, total: 278 }]
+    const cols = ['protected', 'partial', 'unprotected', 'total']
+
+    it('expresses the value as a share of another column', () => {
+      expect(computeStat(summary, cols, { value_field: 'protected', percent_of: 'total' }))
+        .toEqual({ field: 'protected', value: 88.1, percent: true })
+    })
+
+    it('keeps one decimal, because 88% hides 87.6 and 88.4', () => {
+      expect(computeStat([{ v: 876, t: 1000 }], ['v', 't'],
+        { value_field: 'v', percent_of: 't' }).value).toBe(87.6)
+      expect(computeStat([{ v: 884, t: 1000 }], ['v', 't'],
+        { value_field: 'v', percent_of: 't' }).value).toBe(88.4)
+    })
+
+    it('sums the denominator when the value is summed', () => {
+      const rows = [{ v: 1, t: 10 }, { v: 3, t: 30 }]
+      expect(computeStat(rows, ['v', 't'],
+        { value_field: 'v', aggregate: 'sum', percent_of: 't' }).value).toBe(10)
+    })
+
+    it('counts rows against a summed total', () => {
+      const rows = [{ v: 1, t: 4 }, { v: 1, t: 4 }]
+      expect(computeStat(rows, ['v', 't'],
+        { value_field: 'v', aggregate: 'count', percent_of: 't' }).value).toBe(25)
+    })
+
+    it('says nothing rather than 0% or Infinity when the total is zero', () => {
+      expect(computeStat([{ v: 5, t: 0 }], ['v', 't'],
+        { value_field: 'v', percent_of: 't' }).value).toBe('—')
+    })
+
+    it('ignores a missing or non-numeric denominator column', () => {
+      expect(computeStat([{ v: 5 }], ['v'],
+        { value_field: 'v', percent_of: 'nope' }).value).toBe('—')
+      expect(computeStat([{ v: 5, t: 'many' }], ['v', 't'],
+        { value_field: 'v', percent_of: 't' }).value).toBe('—')
+    })
+
+    it('refuses to divide a column by itself', () => {
+      // That is always 100% and always a configuration mistake, so the plain
+      // number is more useful than a meaningless certainty.
+      expect(computeStat([{ v: 5 }], ['v'], { value_field: 'v', percent_of: 'v' }))
+        .toEqual({ field: 'v', value: 5 })
+    })
+
+    it('is inert when not asked for', () => {
+      expect(computeStat(summary, cols, { value_field: 'protected' }))
+        .toEqual({ field: 'protected', value: 245 })
+    })
+
+    it('can exceed 100 rather than clamping', () => {
+      // Over-quota is real and worth seeing; silently capping would hide it.
+      expect(computeStat([{ v: 120, t: 100 }], ['v', 't'],
+        { value_field: 'v', percent_of: 't' }).value).toBe(120)
+    })
+  })
 })
 
 describe('pivotSeries', () => {

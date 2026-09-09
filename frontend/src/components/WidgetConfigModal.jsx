@@ -706,6 +706,15 @@ export default function WidgetConfigModal({
             <input type="number" min="12" max="120" value={opts.value_size ?? ''}
               placeholder="28" onChange={(e) => setOpt('value_size', e.target.value)} />
 
+            <label>Show as a percent of <span className="optional">(another column, optional)</span></label>
+            <input value={opts.percent_of ?? ''} placeholder="total"
+              onChange={(e) => setOpt('percent_of', e.target.value)} />
+            <p className="hint">
+              Both numbers must be columns of the same result, so they come from one
+              fetch and cannot disagree. “Count into buckets” below has a
+              <b> Total column</b> field that produces the denominator.
+            </p>
+
             <label style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
               <input type="checkbox" style={{ width: 'auto' }}
                 checked={Boolean(opts.sparkline)}
@@ -1038,20 +1047,25 @@ export default function WidgetConfigModal({
             </div>
             {(opts.count_by?.buckets || []).map((b, i) => (
               <div className="field-grid" key={i}
-                style={{ gridTemplateColumns: '1.6fr 1fr 1fr auto' }}>
+                style={{ gridTemplateColumns: '1.3fr 1.3fr .9fr .9fr auto' }}>
                 <div>
                   <span className="cap">Name it</span>
                   <input value={b.as || ''} placeholder="expired"
                     onChange={(e) => setBucket(i, { as: e.target.value })} />
                 </div>
                 <div>
+                  <span className="cap">Is (text)</span>
+                  <input value={b.equals ?? ''} placeholder="PROTECTED"
+                    onChange={(e) => setBucket(i, { equals: e.target.value })} />
+                </div>
+                <div>
                   <span className="cap">From (blank = no limit)</span>
-                  <input value={b.min ?? ''} placeholder="—"
+                  <input value={b.min ?? ''} placeholder="—" disabled={Boolean(b.equals)}
                     onChange={(e) => setBucket(i, { min: e.target.value })} />
                 </div>
                 <div>
                   <span className="cap">To (inclusive)</span>
-                  <input value={b.max ?? ''} placeholder="-1"
+                  <input value={b.max ?? ''} placeholder="-1" disabled={Boolean(b.equals)}
                     onChange={(e) => setBucket(i, { max: e.target.value })} />
                 </div>
                 <button type="button" className="danger ghost small icon remove" aria-label="Remove bucket"
@@ -1073,9 +1087,11 @@ export default function WidgetConfigModal({
             <p className="hint">
               Replaces the rows with a single row holding one count per bucket, so a
               stat widget can headline one number and show the others underneath.
-              Ranges are inclusive and the first match wins, so the counts always add
-              up. Rows with no value land in the optional <em>unknown</em> bucket
-              rather than being counted as zero.
+              A bucket counts either a text value (<em>Is</em>, for status columns —
+              case and spacing are ignored, and a comma-separated list is allowed) or a
+              numeric range (<em>From/To</em>). Ranges are inclusive and the first match
+              wins, so the counts always add up. Rows no bucket claims land in the
+              optional <em>blanks</em> bucket rather than being counted as zero.
             </p>
 
             <label>Split columns into rows <span className="optional">(unpivot)</span></label>
