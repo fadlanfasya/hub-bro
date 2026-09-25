@@ -98,6 +98,12 @@ def parse_date(value) -> datetime | None:
             return datetime.strptime(text, fmt)
         except ValueError:
             continue
+    # A bare digit string (e.g. "20260909") has already had its shot at being
+    # an epoch value in _parse_epoch and lost — Python 3.11+'s fromisoformat
+    # accepts it anyway as basic-format ISO 8601, which would silently undo
+    # that rejection and turn a packed date back into a timestamp.
+    if text.isdigit():
+        return None
     try:
         parsed = datetime.fromisoformat(text)
         return parsed.replace(tzinfo=None) if parsed.tzinfo is None else \
