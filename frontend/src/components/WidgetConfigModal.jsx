@@ -185,7 +185,8 @@ export default function WidgetConfigModal({
   }
 
   return (
-    <div className="modal-overlay" ref={overlayRef} style={{ animation: 'none' }} onClick={requestClose}>
+    <div className={showPreview ? 'modal-overlay split' : 'modal-overlay'}
+      ref={overlayRef} style={{ animation: 'none' }} onClick={requestClose}>
       <form className="card modal" ref={boxRef} style={{ animation: 'none' }} onClick={(e) => e.stopPropagation()} onSubmit={save}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <h3 style={{ margin: 0, flex: 1 }}>{widget ? 'Edit widget' : 'Add widget'}</h3>
@@ -1054,18 +1055,20 @@ export default function WidgetConfigModal({
                     onChange={(e) => setBucket(i, { as: e.target.value })} />
                 </div>
                 <div>
-                  <span className="cap">Is (text)</span>
+                  <span className="cap">When the text is</span>
                   <input value={b.equals ?? ''} placeholder="PROTECTED"
                     onChange={(e) => setBucket(i, { equals: e.target.value })} />
                 </div>
                 <div>
-                  <span className="cap">From (blank = no limit)</span>
+                  <span className="cap">or from</span>
                   <input value={b.min ?? ''} placeholder="—" disabled={Boolean(b.equals)}
+                    title={b.equals ? 'A bucket counts text or a range, not both' : undefined}
                     onChange={(e) => setBucket(i, { min: e.target.value })} />
                 </div>
                 <div>
-                  <span className="cap">To (inclusive)</span>
+                  <span className="cap">to (inclusive)</span>
                   <input value={b.max ?? ''} placeholder="-1" disabled={Boolean(b.equals)}
+                    title={b.equals ? 'A bucket counts text or a range, not both' : undefined}
                     onChange={(e) => setBucket(i, { max: e.target.value })} />
                 </div>
                 <button type="button" className="danger ghost small icon remove" aria-label="Remove bucket"
@@ -1087,10 +1090,11 @@ export default function WidgetConfigModal({
             <p className="hint">
               Replaces the rows with a single row holding one count per bucket, so a
               stat widget can headline one number and show the others underneath.
-              A bucket counts either a text value (<em>Is</em>, for status columns —
-              case and spacing are ignored, and a comma-separated list is allowed) or a
-              numeric range (<em>From/To</em>). Ranges are inclusive and the first match
-              wins, so the counts always add up. Rows no bucket claims land in the
+              Each bucket counts one thing: a text value, for status columns
+              (<code>PROTECTED</code> — case and spacing are ignored, and
+              <code>LOST, DISCONNECTED</code> counts either), or a numeric range for
+              columns like <code>days_left</code>. Ranges are inclusive and the first
+              match wins, so the counts always add up. Rows no bucket claims land in the
               optional <em>blanks</em> bucket rather than being counted as zero.
             </p>
 
@@ -1182,28 +1186,34 @@ export default function WidgetConfigModal({
         <div className="modal-footer">
           {type !== 'text' && (
             <button type="button" className="secondary" style={{ marginRight: 'auto' }}
-              onClick={() => setShowPreview(true)}>
-              <Eye size={14} /> Live preview
+              aria-pressed={showPreview}
+              onClick={() => setShowPreview((v) => !v)}>
+              <Eye size={14} /> {showPreview ? 'Hide preview' : 'Live preview'}
             </button>
           )}
           <button type="button" className="secondary" onClick={requestClose}>Cancel</button>
           <button type="submit">Save</button>
         </div>
 
-        {showPreview && (
-          <WidgetPreviewModal
-            widget={{
-              id: widget?.id || 'preview',
-              title,
-              type,
-              datasource_id: Number(datasourceId),
-              options: opts,
-            }}
-            sources={sources}
-            onClose={() => setShowPreview(false)}
-          />
-        )}
       </form>
+
+      {/* A sibling of the form, not a child: nested inside it the panel inherited
+          the modal's own scroll box and width, which is what pinned it into that
+          cramped strip. */}
+      {showPreview && (
+        <WidgetPreviewModal
+          docked
+          widget={{
+            id: widget?.id || 'preview',
+            title,
+            type,
+            datasource_id: Number(datasourceId),
+            options: opts,
+          }}
+          sources={sources}
+          onClose={() => setShowPreview(false)}
+        />
+      )}
     </div>
   )
 }

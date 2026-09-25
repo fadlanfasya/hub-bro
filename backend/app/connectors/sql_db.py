@@ -62,6 +62,26 @@ SQL_OPS = {
 
 IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
+# A colon followed by a word character, but not the second colon of PostgreSQL's
+# `::` cast — that one is preceded by a colon, and the first of the pair is
+# followed by a colon rather than a word character, so neither half matches.
+_COLON = re.compile(r"(?<!:):(?=\w)")
+
+
+def escape_colons(sql: str) -> str:
+    """Protect literal colons from SQLAlchemy's bind-parameter syntax.
+
+    text() reads `:name` as a placeholder, so a query containing '08:00' asks
+    for a parameter called `00` and fails with "A value is required for bind
+    parameter '00'" — a message that never mentions the colon, on a line the
+    author reads as an ordinary string. Times, durations and URLs all hit it.
+
+    The widget form has no way to supply parameter values, so a colon in a user
+    query is always meant literally. Our own filter placeholders are added by
+    _wrap_with_filters *around* this text and so are never escaped.
+    """
+    return _COLON.sub(r"\\:", sql)
+
 
 def _strip_comments(sql: str) -> str:
     sql = re.sub(r"/\*.*?\*/", " ", sql, flags=re.DOTALL)
@@ -84,7 +104,8 @@ def validate_query(query: str) -> str:
         raise ValueError("Only SELECT (or WITH ... SELECT) queries are allowed")
     if FORBIDDEN.search(without_trailing):
         raise ValueError("Only read-only queries are allowed")
-    return without_trailing
+    # Escaped last, so every check above still sees the query as written.
+    return escape_colons(without_trailing)
 
 
 def build_url(config: dict) -> str:

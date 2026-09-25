@@ -902,6 +902,14 @@ table.data .cell-bar-fill.tone-muted {
   letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
 }
 .mini-table tr:last-child td { border-bottom: 0; }
+/* The delivery error, shown under the message rather than hidden in a tooltip.
+   Mono because it is a verbatim response from somewhere else — a status line
+   or an exception name — and break-word because those arrive long and unspaced. */
+.delivery-error {
+  margin-top: 3px;
+  font-family: var(--font-mono); font-size: 11.5px;
+  color: var(--danger); word-break: break-word;
+}
 
 /* ---- text / markdown widget ---- */
 /* everything below sizes in em, so the font-size set on .markdown scales
@@ -1040,6 +1048,35 @@ button.status-pill.error { border: 0; cursor: pointer; }
   .field-grid { grid-template-columns: 1fr 1fr !important; }
 }
 .modal h3 { margin: 0 0 var(--space-2); font-size: 17px; }
+
+/* ---- widget preview docked beside the config modal ----
+   Configuring a widget is a loop: change a field, look at the result. A preview
+   that covers the form breaks the loop, so when it is open the pair share the
+   overlay as two flex items and both stay readable. */
+.modal-overlay.split {
+  align-items: stretch;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-3);
+}
+.modal-overlay.split .modal {
+  /* flex-basis rather than a fixed width: the two shrink together on a laptop
+     instead of the preview being pushed off the right edge. */
+  flex: 1 1 600px; width: auto; max-width: 720px; min-width: 0;
+  max-height: none;
+}
+.preview-dock { display: flex; flex: 1 1 520px; min-width: 0; max-width: 900px; }
+.preview-panel.docked {
+  position: static; width: 100%; height: auto; min-width: 0;
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  animation: none;
+}
+/* Below this the pair is narrower than either half deserves, so stack them and
+   split the height instead of letting both become unusable columns. */
+@media (max-width: 1000px) {
+  .modal-overlay.split { flex-direction: column; align-items: center; }
+  .modal-overlay.split .modal { flex: 1 1 auto; width: min(720px, 94vw); }
+  .preview-dock { flex: 0 0 auto; width: min(720px, 94vw); max-height: 40vh; }
+}
 
 /* ---- widget preview (slide-in over the widget config modal) ---- */
 .preview-overlay {

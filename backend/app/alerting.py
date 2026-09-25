@@ -222,7 +222,14 @@ async def send_webhook(webhook: dict, payload: dict) -> tuple[bool, str | None]:
             return False, f"Webhook returned {resp.status_code}: {resp.text[:150]}"
         return True, None
     except Exception as e:  # noqa: BLE001 — a delivery failure must not kill the loop
-        return False, str(e)[:200]
+        # Several httpx failures stringify to nothing at all — a connect
+        # timeout most of them — and an empty message reached the user as a
+        # bare "Delivery failed" with no way to tell "the token is wrong" from
+        # "this server has no route to the internet". The class name carries
+        # that distinction on its own, so it always goes in front.
+        detail = str(e).strip()
+        return False, (f"{type(e).__name__}: {detail}" if detail
+                       else type(e).__name__)[:200]
 
 
 def record(db, rule: AlertRule, level: str, value, message: str,

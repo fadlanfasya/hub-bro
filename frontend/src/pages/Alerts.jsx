@@ -493,10 +493,19 @@ export default function Alerts() {
                             <td>
                               <span className={`status-pill ${STATE_TONE[n.level] || ''}`}>{n.reason}</span>
                             </td>
-                            <td>{n.message}</td>
+                            <td>
+                              {n.message}
+                              {/* The reason a delivery failed was only ever in a
+                                  title attribute, so it took a hover to find the
+                                  one fact worth reading — and never appeared at
+                                  all for anyone reading on a touch screen. */}
+                              {!n.delivered && n.error && (
+                                <div className="delivery-error">{n.error}</div>
+                              )}
+                            </td>
                             <td>{n.delivered
                               ? <span className="muted">sent</span>
-                              : <span className="danger-text" title={n.error}>failed</span>}</td>
+                              : <span className="danger-text">failed</span>}</td>
                           </tr>
                         ))}
                       </tbody>
