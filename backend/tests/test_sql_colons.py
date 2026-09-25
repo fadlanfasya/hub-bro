@@ -29,8 +29,11 @@ def check(name, got, want):
 # ---- the case that broke -----------------------------------------------------
 check("time literal", escape_colons("SELECT '08:00' AS jam"),
       "SELECT '08\\:00' AS jam")
-check("colon then letters", escape_colons("SELECT 'http://x' AS u"),
-      "SELECT 'http\\://x' AS u")
+# A colon followed by '/' is never read as a bind parameter by SQLAlchemy's
+# text() — its BIND_PARAMS regex requires `:` + at least one word character —
+# so 'http://x' parses fine unescaped and needs no protection.
+check("colon then slash", escape_colons("SELECT 'http://x' AS u"),
+      "SELECT 'http://x' AS u")
 
 # ---- PostgreSQL casts must survive untouched --------------------------------
 # The first colon of :: is followed by a colon, not a word character; the second
