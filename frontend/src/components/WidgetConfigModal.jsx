@@ -348,6 +348,45 @@ export default function WidgetConfigModal({
           </>
         )}
 
+        {source?.type === 'elasticsearch' && (
+          <>
+            <label>Elasticsearch query <span className="optional">— JSON DSL</span></label>
+            <textarea rows={9} value={opts.query || ''} required
+              onChange={(e) => setOpt('query', e.target.value)}
+              style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}
+              placeholder={'{"query":{"match_all":{}},"sort":[{"@timestamp":"desc"}]}'}/>
+            <p className="hint">
+              The full search body is sent to Elasticsearch. Aggregations become chartable rows;
+              <code>size</code> is limited by Max rows below.
+            </p>
+            <label>Max rows</label>
+            <input type="number" min="1" value={opts.max_rows || ''}
+              onChange={(e) => setOpt('max_rows', e.target.value)} placeholder="5000" />
+            <label>Time field <span className="optional">(optional)</span></label>
+            <input value={opts.time_field || ''}
+              onChange={(e) => setOpt('time_field', e.target.value)} placeholder="@timestamp" />
+            <label>Time window</label>
+            <select
+              value={opts.range_minutes ? 'fixed' : (opts.follow_dashboard_range ? 'follow' : 'none')}
+              onChange={(e) => {
+                const mode = e.target.value
+                setOpts((o) => ({
+                  ...o,
+                  follow_dashboard_range: mode === 'follow',
+                  range_minutes: mode === 'fixed' ? (o.range_minutes || 60) : '',
+                }))
+              }}>
+              <option value="follow">Follow dashboard range</option>
+              <option value="fixed">Fixed window</option>
+              <option value="none">No time filter</option>
+            </select>
+            {opts.range_minutes ? (
+              <input type="number" min="1" value={opts.range_minutes}
+                onChange={(e) => setOpt('range_minutes', e.target.value)} placeholder="60" />
+            ) : null}
+          </>
+        )}
+
         {source?.type === 'glpi' && (
           <>
             <label>Item type</label>

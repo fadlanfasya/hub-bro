@@ -59,7 +59,7 @@ class Token(BaseModel):
 # ---- Data sources ----
 class DataSourceCreate(BaseModel):
     name: str
-    type: str  # rest | csv | prometheus | glpi | sql | truewatch
+    type: str  # rest | csv | prometheus | glpi | sql | truewatch | elasticsearch
     config: dict[str, Any] = {}
     # workspace | private. Defaults to private so an editor adding their own
     # source never publishes credentials to everyone by accident.

@@ -17,7 +17,8 @@ container.
   - **Prometheus** — instant and range PromQL; labels become their own columns, and one table widget can join several queries
   - **GLPI** — automatic session handling, pagination, and server-side filter pushdown
   - **SQL** — PostgreSQL / MySQL / MariaDB / SQLite / Doris / StarRocks, one SELECT per widget
-  - **TrueWatch / Guance** — DQL and PromQL through the Open API
+   - **TrueWatch / Guance** — DQL and PromQL through the Open API
+   - **Elasticsearch / OpenSearch** — JSON DSL search, time windows, pagination, and bucket aggregations
 - TLS verification decided by the address rather than a checkbox: private ranges skip it, public hosts don't
 - Data transforms per widget: filter rows, group by a column, aggregate (count/sum/avg/min/max), sort, limit
 - `date_diff` turns a date into a number of days (with `+ months` for GLPI contracts, which store a start date and a duration)

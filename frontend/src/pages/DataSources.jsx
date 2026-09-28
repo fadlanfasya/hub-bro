@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Globe, FileSpreadsheet, Activity, Server, Table2, X, Plus, Database, Loader2, CheckCircle2, XCircle, Pencil, Trash2, Info, Eye, Lock, Users } from 'lucide-react'
+import { Globe, FileSpreadsheet, Activity, Server, Table2, X, Plus, Database, Loader2, CheckCircle2, XCircle, Pencil, Trash2, Info, Eye, Lock, Users, Search } from 'lucide-react'
 import { datasources, data } from '../api'
 import SecretField from '../components/SecretField'
 import SharePanel from '../components/SharePanel'
@@ -7,11 +7,11 @@ import { useAuth } from '../useAuth'
 
 const TYPE_LABELS = {
   rest: 'REST API', csv: 'CSV file', prometheus: 'Prometheus', glpi: 'GLPI', sql: 'SQL database',
-  truewatch: 'TrueWatch',
+  truewatch: 'TrueWatch', elasticsearch: 'Elasticsearch',
 }
 const TYPE_ICONS = {
   rest: Globe, csv: FileSpreadsheet, prometheus: Activity, glpi: Server, sql: Table2,
-  truewatch: Eye,
+  truewatch: Eye, elasticsearch: Search,
 }
 const SOURCE_TYPES = [
   { key: 'rest', label: 'REST API' },
@@ -19,6 +19,7 @@ const SOURCE_TYPES = [
   { key: 'glpi', label: 'GLPI' },
   { key: 'truewatch', label: 'TrueWatch' },
   { key: 'prometheus', label: 'Prometheus' },
+  { key: 'elasticsearch', label: 'Elasticsearch / OpenSearch' },
   { key: 'csv', label: 'CSV upload' },
 ]
 const TRUEWATCH_DEFAULT_ENDPOINT = 'https://openapi.truewatch.com'
@@ -38,11 +39,13 @@ export default function DataSources() {
   const [headerRows, setHeaderRows] = useState([{ key: '', value: '' }])
   const [baseUrl, setBaseUrl] = useState('')
   const [promUser, setPromUser] = useState('')
+  const [elasticIndex, setElasticIndex] = useState('')
+  const [elasticAuth, setElasticAuth] = useState('basic')
   const [method, setMethod] = useState('GET')
   const [body, setBody] = useState('')
   const [sql, setSql] = useState({ driver: 'postgresql', host: '', port: '', database: '', user: '' })
   // secrets: null means "untouched, keep whatever is stored"; a string is a new value
-  const [secrets, setSecrets] = useState({ password: '', app_token: '', user_token: '', api_key: '' })
+  const [secrets, setSecrets] = useState({ password: '', app_token: '', user_token: '', api_key: '', token: '' })
   const [stored, setStored] = useState({})
   const [workspaceUuids, setWorkspaceUuids] = useState('')
   const setSecret = (k, v) => setSecrets((s2) => ({ ...s2, [k]: v }))
@@ -66,9 +69,10 @@ export default function DataSources() {
     setEditingId(null)
     setName(''); setUrl(''); setHeaderRows([{ key: '', value: '' }])
     setBaseUrl(''); setPromUser(''); setFile(null); setError('')
+    setElasticIndex(''); setElasticAuth('basic')
     setMethod('GET'); setBody('')
     setSql({ driver: 'postgresql', host: '', port: '', database: '', user: '' })
-    setSecrets({ password: '', app_token: '', user_token: '', api_key: '' })
+    setSecrets({ password: '', app_token: '', user_token: '', api_key: '', token: '' })
     setStored({})
     setWorkspaceUuids('')
     setMonitor(false)
@@ -83,6 +87,8 @@ export default function DataSources() {
     setUrl(ds.config.url || '')
     setBaseUrl(ds.config.base_url || ds.config.endpoint || '')
     setPromUser(ds.config.username || '')
+    setElasticIndex(ds.config.index || '')
+    setElasticAuth(ds.config.api_key ? 'api_key' : (ds.config.token ? 'token' : 'basic'))
     setWorkspaceUuids(
       Array.isArray(ds.config.workspace_uuids)
         ? ds.config.workspace_uuids.join(', ')
@@ -102,8 +108,9 @@ export default function DataSources() {
       app_token: Boolean(ds.config.app_token),
       user_token: Boolean(ds.config.user_token),
       api_key: Boolean(ds.config.api_key),
+      token: Boolean(ds.config.token),
     })
-    setSecrets({ password: null, app_token: null, user_token: null, api_key: null })
+    setSecrets({ password: null, app_token: null, user_token: null, api_key: null, token: null })
     setMonitor(Boolean(ds.config.monitor))
     setVisibility(ds.visibility || 'workspace')
     setTokensInQuery(Boolean(ds.config.tokens_in_query))
@@ -130,6 +137,15 @@ export default function DataSources() {
     if (type === 'prometheus') {
       return { base_url: baseUrl, username: promUser,
                password: secretValue('password'), monitor }
+    }
+    if (type === 'elasticsearch') {
+      return {
+        base_url: baseUrl, index: elasticIndex,
+        username: elasticAuth === 'basic' ? promUser : '',
+        password: elasticAuth === 'basic' ? secretValue('password') : '',
+        api_key: elasticAuth === 'api_key' ? secretValue('api_key') : '',
+        token: elasticAuth === 'token' ? secretValue('token') : '', monitor,
+      }
     }
     if (type === 'glpi') {
       return {
@@ -178,6 +194,7 @@ export default function DataSources() {
     setTestResult({ id: ds.id, status: 'loading' })
     try {
       const options = ds.type === 'prometheus' ? { query: 'up' }
+        : ds.type === 'elasticsearch' ? { query: { query: { match_all: {} } }, max_rows: 1 }
         : ds.type === 'glpi' ? { itemtype: 'Computer', max_rows: 5 }
         : ds.type === 'truewatch' ? { query: 'show_object_source()', limit: 5 }
         : ds.type === 'sql' ? { query: 'SELECT 1', limit: 1 } : {}
@@ -287,6 +304,39 @@ export default function DataSources() {
                 value={secrets.password} hasStored={stored.password}
                 onChange={(v) => setSecret('password', v)}
                 hint="Only needed if a proxy in front of Prometheus asks for one." />
+            </>
+          )}
+          {type === 'elasticsearch' && (
+            <>
+              <label>Cluster URL</label>
+              <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} required
+                placeholder="https://elasticsearch.example.com" />
+              <label>Index / data stream</label>
+              <input value={elasticIndex} onChange={(e) => setElasticIndex(e.target.value)} required
+                placeholder="logs-*" />
+              <label>Authentication</label>
+              <select value={elasticAuth} onChange={(e) => setElasticAuth(e.target.value)}>
+                <option value="basic">Username and password</option>
+                <option value="api_key">API key</option>
+                <option value="token">Bearer token</option>
+              </select>
+              {elasticAuth === 'basic' && (
+                <>
+                  <label>Username</label>
+                  <input value={promUser} onChange={(e) => setPromUser(e.target.value)} autoComplete="off" />
+                  <SecretField label="Password" value={secrets.password} hasStored={stored.password}
+                    onChange={(v) => setSecret('password', v)} />
+                </>
+              )}
+              {elasticAuth === 'api_key' && (
+                <SecretField label="API key" value={secrets.api_key} hasStored={stored.api_key}
+                  onChange={(v) => setSecret('api_key', v)} hint="Value only, without the 'ApiKey ' prefix." />
+              )}
+              {elasticAuth === 'token' && (
+                <SecretField label="Bearer token" value={secrets.token} hasStored={stored.token}
+                  onChange={(v) => setSecret('token', v)} />
+              )}
+              <p className="hint">Use an index, alias, data stream, or wildcard such as <code>logs-*</code>.</p>
             </>
           )}
           {type === 'glpi' && (

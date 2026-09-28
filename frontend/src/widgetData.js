@@ -34,6 +34,7 @@ export function buildOptions(widget, dashboardRange, crossFilters) {
   // browser, and sending it would split the cache for identical data
   if (o.itemtype) opts.itemtype = o.itemtype
   if (o.max_rows) opts.max_rows = o.max_rows
+  if (o.time_field) opts.time_field = o.time_field
   // GLPI: "search" returns the item type's default display columns, "list"
   // returns every stored field. Only send it when it differs from the default.
   if (o.mode === 'list') opts.mode = 'list'

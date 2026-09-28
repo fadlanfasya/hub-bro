@@ -2,12 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Activity, RefreshCw, Loader2, AlertCircle, CheckCircle2, HelpCircle, Clock,
-  Globe, FileSpreadsheet, Server, Table2,
+  Globe, FileSpreadsheet, Server, Table2, Search,
 } from 'lucide-react'
 import { datasources } from '../api'
 
 const TYPE_ICONS = {
   rest: Globe, csv: FileSpreadsheet, prometheus: Activity, glpi: Server, sql: Table2,
+  elasticsearch: Search,
 }
 
 const STATUS = {

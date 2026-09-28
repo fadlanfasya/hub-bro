@@ -1,4 +1,4 @@
-from . import csv_file, glpi, prometheus, rest_api, sql_db, truewatch
+from . import csv_file, elasticsearch, glpi, prometheus, rest_api, sql_db, truewatch
 
 CONNECTORS = {
     "rest": rest_api.fetch,
@@ -7,6 +7,7 @@ CONNECTORS = {
     "glpi": glpi.fetch,
     "sql": sql_db.fetch,
     "truewatch": truewatch.fetch,
+    "elasticsearch": elasticsearch.fetch,
 }
 
 

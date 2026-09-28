@@ -28,7 +28,7 @@ router = APIRouter(prefix="/api/datasources", tags=["datasources"])
 
 UPLOAD_DIR = str(settings.UPLOAD_DIR)
 
-VALID_TYPES = {"rest", "csv", "prometheus", "glpi", "sql", "truewatch"}
+VALID_TYPES = {"rest", "csv", "prometheus", "glpi", "sql", "truewatch", "elasticsearch"}
 
 
 def _to_out(ds: DataSource, user: User | None = None,
