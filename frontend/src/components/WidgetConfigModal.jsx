@@ -8,6 +8,24 @@ import { Eye } from 'lucide-react'
 import WidgetPreviewModal from './WidgetPreviewModal'
 import { useModalMotion } from '../useModalMotion'
 
+/** A collapsible sub-section, matching the existing "Filter & summarize" pattern —
+ * closed by default unless it already holds a value, so editing an existing
+ * widget doesn't hide settings that are actually in use. */
+function Section({ title, open, onToggle, active, children }) {
+  return (
+    <>
+      <div className="section-toggle">
+        <button type="button" className="link" onClick={onToggle}>
+          {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          {title}
+          {active && !open && <span className="dot" />}
+        </button>
+      </div>
+      {open && <div className="subsection">{children}</div>}
+    </>
+  )
+}
+
 export default function WidgetConfigModal({
   widget, sources, onSave, onClose, dashboardList = [], currentDashboardId,
   // columns from this widget's most recent fetch, when it has one — lets the
@@ -44,6 +62,23 @@ export default function WidgetConfigModal({
     Boolean(widget?.options?.group_by || widget?.options?.filters?.length
       || widget?.options?.sort || widget?.options?.unpivot)
   )
+  const [showStatTrend, setShowStatTrend] = useState(
+    Boolean(widget?.options?.compare_field !== undefined || widget?.options?.compare_mode)
+  )
+  const [showStatExtras, setShowStatExtras] = useState(
+    Boolean(widget?.options?.percent_of || widget?.options?.sparkline || widget?.options?.detail)
+  )
+  const [showThresholds, setShowThresholds] = useState(Boolean(
+    widget?.options?.thresholds?.warn || widget?.options?.thresholds?.critical
+      || widget?.options?.prefix || widget?.options?.suffix
+      || (widget?.options?.decimals ?? '') !== '' || widget?.options?.compact
+      || widget?.options?.thousands === false
+      || (widget?.options?.aggregate && widget?.options?.aggregate !== 'last')
+  ))
+  const [showTableStyling, setShowTableStyling] = useState(Boolean(
+    widget?.options?.color_rules?.length || widget?.options?.column_format?.length
+      || widget?.options?.bar_columns?.length
+  ))
 
   const source = sources.find((s) => s.id === Number(datasourceId))
   const setOpt = (k, v) => setOpts((o) => ({ ...o, [k]: v }))
@@ -200,13 +235,19 @@ export default function WidgetConfigModal({
 
         <label>Widget type</label>
         <select value={type} onChange={(e) => setType(e.target.value)}>
-          <option value="line">Line chart</option>
-          <option value="bar">Bar chart</option>
-          <option value="pie">Pie / donut chart</option>
-          <option value="stat">Stat (single number)</option>
-          <option value="gauge">Gauge</option>
-          <option value="table">Table</option>
-          <option value="text">Text / notes</option>
+          <optgroup label="Charts">
+            <option value="line">Line chart</option>
+            <option value="bar">Bar chart</option>
+            <option value="pie">Pie / donut chart</option>
+          </optgroup>
+          <optgroup label="Single value">
+            <option value="stat">Stat (single number)</option>
+            <option value="gauge">Gauge</option>
+          </optgroup>
+          <optgroup label="Other">
+            <option value="table">Table</option>
+            <option value="text">Text / notes</option>
+          </optgroup>
         </select>
 
         {type === 'text' ? (
@@ -556,78 +597,82 @@ export default function WidgetConfigModal({
               </select>
             </div>
 
-            <label>Colour rules</label>
-            {(opts.color_rules || []).map((rule, i) => (
-              <div key={i} className="filter-row">
-                <input value={rule.column || ''} placeholder="Column"
-                  onChange={(e) => setRule(i, { column: e.target.value })} />
-                <select value={rule.op || 'eq'} onChange={(e) => setRule(i, { op: e.target.value })}>
-                  <option value="eq">is</option>
-                  <option value="ne">is not</option>
-                  <option value="contains">contains</option>
-                  <option value="gt">&gt;</option>
-                  <option value="gte">≥</option>
-                  <option value="lt">&lt;</option>
-                  <option value="lte">≤</option>
-                </select>
-                <input value={rule.value ?? ''} placeholder="Value"
-                  onChange={(e) => setRule(i, { value: e.target.value })} />
-                <select style={{ width: 110 }} value={rule.tone || 'bad'}
-                  onChange={(e) => setRule(i, { tone: e.target.value })}>
-                  {TONES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
-                </select>
-                <button type="button" className="ghost small icon" aria-label="Remove rule"
-                  onClick={() => setOpt('color_rules',
-                    (opts.color_rules || []).filter((_, j) => j !== i))}>
-                  <X size={13} />
-                </button>
-              </div>
-            ))}
-            <button type="button" className="link"
-              onClick={() => setOpt('color_rules',
-                [...(opts.color_rules || []), { column: '', op: 'eq', value: '', tone: 'bad' }])}>
-              <Plus size={13} /> Add colour rule
-            </button>
-            <p className="hint">First matching rule wins. Tick "whole row" style by naming the same column in several rules.</p>
+            <Section title="Row styling" open={showTableStyling}
+              onToggle={() => setShowTableStyling((v) => !v)}
+              active={Boolean(opts.color_rules?.length || opts.column_format?.length || barsText)}>
+              <label>Colour rules</label>
+              {(opts.color_rules || []).map((rule, i) => (
+                <div key={i} className="filter-row">
+                  <input value={rule.column || ''} placeholder="Column"
+                    onChange={(e) => setRule(i, { column: e.target.value })} />
+                  <select value={rule.op || 'eq'} onChange={(e) => setRule(i, { op: e.target.value })}>
+                    <option value="eq">is</option>
+                    <option value="ne">is not</option>
+                    <option value="contains">contains</option>
+                    <option value="gt">&gt;</option>
+                    <option value="gte">≥</option>
+                    <option value="lt">&lt;</option>
+                    <option value="lte">≤</option>
+                  </select>
+                  <input value={rule.value ?? ''} placeholder="Value"
+                    onChange={(e) => setRule(i, { value: e.target.value })} />
+                  <select style={{ width: 110 }} value={rule.tone || 'bad'}
+                    onChange={(e) => setRule(i, { tone: e.target.value })}>
+                    {TONES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+                  </select>
+                  <button type="button" className="ghost small icon" aria-label="Remove rule"
+                    onClick={() => setOpt('color_rules',
+                      (opts.color_rules || []).filter((_, j) => j !== i))}>
+                    <X size={13} />
+                  </button>
+                </div>
+              ))}
+              <button type="button" className="link"
+                onClick={() => setOpt('color_rules',
+                  [...(opts.color_rules || []), { column: '', op: 'eq', value: '', tone: 'bad' }])}>
+                <Plus size={13} /> Add colour rule
+              </button>
+              <p className="hint">First matching rule wins. Tick "whole row" style by naming the same column in several rules.</p>
 
-            <label>Number format <span className="optional">(per column)</span></label>
-            {(opts.column_format || []).map((spec, i) => (
-              <div key={i} className="filter-row">
-                <input value={spec.column || ''} placeholder="Column"
-                  onChange={(e) => setFormat(i, { column: e.target.value })} />
-                <input type="number" min="0" max="6" style={{ width: 110 }}
-                  value={spec.decimals ?? ''} placeholder="Decimals"
-                  onChange={(e) => setFormat(i, { decimals: e.target.value })} />
-                <input style={{ width: 90 }} value={spec.unit || ''} placeholder="Unit"
-                  onChange={(e) => setFormat(i, { unit: e.target.value })} />
-                <button type="button" className="ghost small icon" aria-label="Remove format"
-                  onClick={() => setOpt('column_format',
-                    (opts.column_format || []).filter((_, j) => j !== i))}>
-                  <X size={13} />
-                </button>
-              </div>
-            ))}
-            <button type="button" className="link"
-              onClick={() => setOpt('column_format',
-                [...(opts.column_format || []), { column: '', decimals: 1, unit: '' }])}>
-              <Plus size={13} /> Add number format
-            </button>
-            <p className="hint">
-              Only changes what's shown — sorting and colour rules still use the full value.
-            </p>
+              <label>Number format <span className="optional">(per column)</span></label>
+              {(opts.column_format || []).map((spec, i) => (
+                <div key={i} className="filter-row">
+                  <input value={spec.column || ''} placeholder="Column"
+                    onChange={(e) => setFormat(i, { column: e.target.value })} />
+                  <input type="number" min="0" max="6" style={{ width: 110 }}
+                    value={spec.decimals ?? ''} placeholder="Decimals"
+                    onChange={(e) => setFormat(i, { decimals: e.target.value })} />
+                  <input style={{ width: 90 }} value={spec.unit || ''} placeholder="Unit"
+                    onChange={(e) => setFormat(i, { unit: e.target.value })} />
+                  <button type="button" className="ghost small icon" aria-label="Remove format"
+                    onClick={() => setOpt('column_format',
+                      (opts.column_format || []).filter((_, j) => j !== i))}>
+                    <X size={13} />
+                  </button>
+                </div>
+              ))}
+              <button type="button" className="link"
+                onClick={() => setOpt('column_format',
+                  [...(opts.column_format || []), { column: '', decimals: 1, unit: '' }])}>
+                <Plus size={13} /> Add number format
+              </button>
+              <p className="hint">
+                Only changes what's shown — sorting and colour rules still use the full value.
+              </p>
 
-            <label>Bar columns <span className="optional">(comma separated)</span></label>
-            <div className="field-row">
-              <input value={barsText} onChange={(e) => setBarsText(e.target.value)}
-                placeholder="CPU Utilization, Memory Utilization" />
-              <input type="number" style={{ width: 130 }} min="0"
-                value={opts.bar_max ?? ''} placeholder="Max"
-                onChange={(e) => setOpt('bar_max', e.target.value)} />
-            </div>
-            <p className="hint">
-              Draws a fill behind the number. Leave Max blank to scale to the busiest
-              row — percentage columns snap to 0–100 on their own.
-            </p>
+              <label>Bar columns <span className="optional">(comma separated)</span></label>
+              <div className="field-row">
+                <input value={barsText} onChange={(e) => setBarsText(e.target.value)}
+                  placeholder="CPU Utilization, Memory Utilization" />
+                <input type="number" style={{ width: 130 }} min="0"
+                  value={opts.bar_max ?? ''} placeholder="Max"
+                  onChange={(e) => setOpt('bar_max', e.target.value)} />
+              </div>
+              <p className="hint">
+                Draws a fill behind the number. Leave Max blank to scale to the busiest
+                row — percentage columns snap to 0–100 on their own.
+              </p>
+            </Section>
 
             <label style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
               <input type="checkbox" style={{ width: 'auto' }}
@@ -666,10 +711,8 @@ export default function WidgetConfigModal({
             <label>Label <span className="optional">(blank uses the field name, empty hides it)</span></label>
             <input value={opts.label ?? ''} placeholder={opts.value_field || 'field name'}
               onChange={(e) => setOpt('label', e.target.value)} />
-            <p className="hint">
-              Thresholds, number formatting and the value field are set below —
-              the same controls a stat widget uses.
-            </p>
+            <label>Value field <span className="optional">(optional, defaults to first numeric column)</span></label>
+            <input value={opts.value_field || ''} onChange={(e) => setOpt('value_field', e.target.value)} />
           </>
         )}
 
@@ -678,6 +721,8 @@ export default function WidgetConfigModal({
             <label>Label <span className="optional">(blank uses the field name, empty hides it)</span></label>
             <input value={opts.label ?? ''} placeholder={opts.value_field || 'field name'}
               onChange={(e) => setOpt('label', e.target.value)} />
+            <label>Value field <span className="optional">(optional, defaults to first numeric column)</span></label>
+            <input value={opts.value_field || ''} onChange={(e) => setOpt('value_field', e.target.value)} />
 
             <label>Alignment</label>
             <div className="field-row">
@@ -707,106 +752,118 @@ export default function WidgetConfigModal({
             <input type="number" min="12" max="120" value={opts.value_size ?? ''}
               placeholder="28" onChange={(e) => setOpt('value_size', e.target.value)} />
 
-            <label>Show as a percent of <span className="optional">(another column, optional)</span></label>
-            <input value={opts.percent_of ?? ''} placeholder="total"
-              onChange={(e) => setOpt('percent_of', e.target.value)} />
-            <p className="hint">
-              Both numbers must be columns of the same result, so they come from one
-              fetch and cannot disagree. “Count into buckets” below has a
-              <b> Total column</b> field that produces the denominator.
-            </p>
+            <Section title="Comparison &amp; trend" open={showStatTrend}
+              onToggle={() => setShowStatTrend((v) => !v)}
+              active={opts.compare_field !== undefined || Boolean(opts.compare_mode)}>
+              <label>Compare against <span className="optional">(shows a trend arrow)</span></label>
+              <select value={opts.compare_field ? 'field' : (opts.compare_mode || 'none')}
+                onChange={(e) => {
+                  const mode = e.target.value
+                  setOpts((o) => ({
+                    ...o,
+                    compare_mode: mode === 'previous_row' ? 'previous_row' : undefined,
+                    compare_field: mode === 'field' ? (o.compare_field || '') : undefined,
+                  }))
+                }}>
+                <option value="none">Nothing</option>
+                <option value="field">Another column in the same row</option>
+                <option value="previous_row">The previous row (time series)</option>
+              </select>
+              {opts.compare_field !== undefined && (
+                <>
+                  <label>Baseline column</label>
+                  <input value={opts.compare_field || ''} placeholder="yesterday"
+                    onChange={(e) => setOpt('compare_field', e.target.value)} />
+                  <p className="hint">
+                    e.g. a second <code>count(*) FILTER (…)</code> in the same query holding
+                    the previous period's total.
+                  </p>
+                </>
+              )}
+              {(opts.compare_field !== undefined || opts.compare_mode) && (
+                <>
+                  <label>Caption <span className="optional">(optional)</span></label>
+                  <input value={opts.compare_label || ''} placeholder="vs yesterday"
+                    onChange={(e) => setOpt('compare_label', e.target.value)} />
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                    <input type="checkbox" style={{ width: 'auto' }}
+                      checked={opts.higher_is_better !== false}
+                      onChange={(e) => setOpt('higher_is_better', e.target.checked)} />
+                    An increase is good (uncheck for failure counts)
+                  </label>
+                </>
+              )}
+            </Section>
 
-            <label style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-              <input type="checkbox" style={{ width: 'auto' }}
-                checked={Boolean(opts.sparkline)}
-                onChange={(e) => setOpt('sparkline', e.target.checked)} />
-              Show a sparkline
-            </label>
-            <p className="hint">
-              Needs a query that returns one row per time bucket, oldest first —
-              e.g. <code>GROUP BY DATE_TRUNC(&apos;hour&apos;, ts) ORDER BY 1</code>.
-              The last row becomes the big number and the whole series draws the line.
-            </p>
-            {opts.sparkline && (
-              <>
-                <label>Sparkline column <span className="optional">(blank = the value column)</span></label>
-                <input value={opts.spark_field || ''} placeholder=""
-                  onChange={(e) => setOpt('spark_field', e.target.value)} />
-              </>
-            )}
+            <Section title="Extras" open={showStatExtras}
+              onToggle={() => setShowStatExtras((v) => !v)}
+              active={Boolean(opts.percent_of || opts.sparkline || opts.detail)}>
+              <label>Show as a percent of <span className="optional">(another column, optional)</span></label>
+              <input value={opts.percent_of ?? ''} placeholder="total"
+                onChange={(e) => setOpt('percent_of', e.target.value)} />
+              <p className="hint">
+                Both numbers must be columns of the same result, so they come from one
+                fetch and cannot disagree. “Count into buckets” below has a
+                <b> Total column</b> field that produces the denominator.
+              </p>
 
-            <label>Supporting numbers <span className="optional">(optional)</span></label>
-            <input value={opts.detail || ''}
-              placeholder="{on_track} on track · {warning} warning"
-              onChange={(e) => setOpt('detail', e.target.value)} />
-            <p className="hint">
-              Free text with <code>{'{column}'}</code> placeholders, filled from this same
-              query. Lets one tile answer &quot;is that number bad?&quot; without a drill-down.
-            </p>
-            {(() => {
-              const used = templateColumns(opts.detail)
-              if (!used.length) return null
-              // Warn about typos while editing rather than rendering an em dash
-              // on the dashboard and leaving them to wonder why.
-              const known = availableColumns
-              const unknown = known.length ? used.filter((c) => !known.includes(c)) : []
-              return (
-                <p className="hint">
-                  {unknown.length
-                    ? <span className="danger-text">
-                        Not in this query: {unknown.join(', ')}
-                        {known.length ? ` — available: ${known.join(', ')}` : ''}
-                      </span>
-                    : `Using: ${used.join(', ')}`}
-                </p>
-              )
-            })()}
+              <label style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                <input type="checkbox" style={{ width: 'auto' }}
+                  checked={Boolean(opts.sparkline)}
+                  onChange={(e) => setOpt('sparkline', e.target.checked)} />
+                Show a sparkline
+              </label>
+              <p className="hint">
+                Needs a query that returns one row per time bucket, oldest first —
+                e.g. <code>GROUP BY DATE_TRUNC(&apos;hour&apos;, ts) ORDER BY 1</code>.
+                The last row becomes the big number and the whole series draws the line.
+              </p>
+              {opts.sparkline && (
+                <>
+                  <label>Sparkline column <span className="optional">(blank = the value column)</span></label>
+                  <input value={opts.spark_field || ''} placeholder=""
+                    onChange={(e) => setOpt('spark_field', e.target.value)} />
+                </>
+              )}
 
-            <label>Compare against <span className="optional">(shows a trend arrow)</span></label>
-            <select value={opts.compare_field ? 'field' : (opts.compare_mode || 'none')}
-              onChange={(e) => {
-                const mode = e.target.value
-                setOpts((o) => ({
-                  ...o,
-                  compare_mode: mode === 'previous_row' ? 'previous_row' : undefined,
-                  compare_field: mode === 'field' ? (o.compare_field || '') : undefined,
-                }))
-              }}>
-              <option value="none">Nothing</option>
-              <option value="field">Another column in the same row</option>
-              <option value="previous_row">The previous row (time series)</option>
-            </select>
-            {opts.compare_field !== undefined && (
-              <>
-                <label>Baseline column</label>
-                <input value={opts.compare_field || ''} placeholder="yesterday"
-                  onChange={(e) => setOpt('compare_field', e.target.value)} />
-                <p className="hint">
-                  e.g. a second <code>count(*) FILTER (…)</code> in the same query holding
-                  the previous period's total.
-                </p>
-              </>
-            )}
-            {(opts.compare_field !== undefined || opts.compare_mode) && (
-              <>
-                <label>Caption <span className="optional">(optional)</span></label>
-                <input value={opts.compare_label || ''} placeholder="vs yesterday"
-                  onChange={(e) => setOpt('compare_label', e.target.value)} />
-                <label style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                  <input type="checkbox" style={{ width: 'auto' }}
-                    checked={opts.higher_is_better !== false}
-                    onChange={(e) => setOpt('higher_is_better', e.target.checked)} />
-                  An increase is good (uncheck for failure counts)
-                </label>
-              </>
-            )}
+              <label>Supporting numbers <span className="optional">(optional)</span></label>
+              <input value={opts.detail || ''}
+                placeholder="{on_track} on track · {warning} warning"
+                onChange={(e) => setOpt('detail', e.target.value)} />
+              <p className="hint">
+                Free text with <code>{'{column}'}</code> placeholders, filled from this same
+                query. Lets one tile answer &quot;is that number bad?&quot; without a drill-down.
+              </p>
+              {(() => {
+                const used = templateColumns(opts.detail)
+                if (!used.length) return null
+                // Warn about typos while editing rather than rendering an em dash
+                // on the dashboard and leaving them to wonder why.
+                const known = availableColumns
+                const unknown = known.length ? used.filter((c) => !known.includes(c)) : []
+                return (
+                  <p className="hint">
+                    {unknown.length
+                      ? <span className="danger-text">
+                          Not in this query: {unknown.join(', ')}
+                          {known.length ? ` — available: ${known.join(', ')}` : ''}
+                        </span>
+                      : `Using: ${used.join(', ')}`}
+                  </p>
+                )
+              })()}
+            </Section>
           </>
         )}
 
         {(type === 'stat' || type === 'gauge') && (
-          <>
-            <label>Value field (optional)</label>
-            <input value={opts.value_field || ''} onChange={(e) => setOpt('value_field', e.target.value)} />
+          <Section title="Thresholds &amp; number format" open={showThresholds}
+            onToggle={() => setShowThresholds((v) => !v)}
+            active={Boolean(
+              opts.thresholds?.warn || opts.thresholds?.critical || opts.prefix || opts.suffix
+                || (opts.decimals ?? '') !== '' || opts.compact || opts.thousands === false
+                || (opts.aggregate && opts.aggregate !== 'last')
+            )}>
             <label>Thresholds <span className="optional">(optional)</span></label>
             <div className="field-row">
               <select style={{ width: 160 }} value={opts.thresholds?.direction || 'above'}
@@ -863,7 +920,7 @@ export default function WidgetConfigModal({
               <option value="avg">Average</option>
               <option value="count">Row count</option>
             </select>
-          </>
+          </Section>
         )}
 
         {type === 'table' && (

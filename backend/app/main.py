@@ -2,13 +2,14 @@ import asyncio
 import logging
 import sys
 
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import migrations, static_files
 from .config import check_production_config, settings
 from .database import Base, engine
 from .routers import alerts, auth_routes, dashboards, data, datasources, public, users
+from .presence import presence, user_from_token
 
 log = logging.getLogger("uvicorn.error")
 
@@ -68,6 +69,23 @@ app.include_router(dashboards.router)
 app.include_router(data.router)
 app.include_router(alerts.router)
 app.include_router(public.router)
+
+
+@app.websocket("/api/presence/{dashboard_id}")
+async def dashboard_presence(websocket: WebSocket, dashboard_id: str, token: str = ""):
+    user = user_from_token(token)
+    if user is None:
+        await websocket.close(code=1008)
+        return
+    await websocket.accept()
+    users = await presence.connect(dashboard_id, user.id, websocket)
+    await presence.broadcast(dashboard_id, {"type": "presence", "dashboard_id": dashboard_id, "users": users})
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        users = await presence.disconnect(dashboard_id, user.id)
+        await presence.broadcast(dashboard_id, {"type": "presence", "dashboard_id": dashboard_id, "users": users})
 
 
 @app.get("/api/health")
