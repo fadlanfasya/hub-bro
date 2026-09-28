@@ -26,6 +26,9 @@ import { backTarget, searchFromUrl } from '../links'
 import { downloadCsv, downloadPng } from '../export'
 import { DEFAULT_RANGE, RANGES } from '../timeRange'
 import { useAuth } from '../useAuth'
+import { usePresence } from '../usePresence'
+import Collaborators from '../components/Collaborators'
+import RemoteCursors from '../components/RemoteCursors'
 
 export default function DashboardEditor() {
   const { id } = useParams()
@@ -33,7 +36,8 @@ export default function DashboardEditor() {
   const location = useLocation()
   const back = useMemo(() => backTarget(location.search), [location.search])
   const initialSearch = useMemo(() => searchFromUrl(location.search), [location.search])
-  const { can } = useAuth()
+  const { can, user } = useAuth()
+  const { collaborators, cursors, sendCursor } = usePresence(id)
   const canEdit = can('dashboard.edit')
   const [theme] = useTheme()   // light or dark, so widget accents pick the right variant
   const [dashboard, setDashboard] = useState(null)
@@ -316,6 +320,15 @@ export default function DashboardEditor() {
     )
   }
 
+  const updateRemoteCursor = (event) => {
+    const target = event.target.closest('[data-widget-id]')
+    sendCursor({
+      x: event.clientX,
+      y: event.clientY,
+      widget_id: target?.dataset.widgetId || null,
+    })
+  }
+
   return (
     <>
       <div className="editor-bar">
@@ -343,7 +356,8 @@ export default function DashboardEditor() {
               : <><Check size={12} /> Saved</>}
           </span>
         )}
-        <span className="spacer" />
+         <span className="spacer" />
+        <Collaborators users={collaborators} />
         {hasTimeSeries && (
           <select className="range-picker" value={timeRange} aria-label="Dashboard time range"
             onChange={(e) => setTimeRange(e.target.value)}>
@@ -374,7 +388,8 @@ export default function DashboardEditor() {
         )}
       </div>
 
-      <div className="editor-body">
+      <div className="editor-body" onMouseMove={updateRemoteCursor}
+        onMouseLeave={() => sendCursor(null)}>
         {selection && (
           <div className="filter-bar">
             <Filter size={13} />
@@ -412,6 +427,7 @@ export default function DashboardEditor() {
             />
           </div>
         </ThemeScope>
+        <RemoteCursors cursors={cursors} collaborators={collaborators} currentUserId={user?.id} />
 
         {conflict && (
           <div className="notice" style={{ marginBottom: 16 }}>

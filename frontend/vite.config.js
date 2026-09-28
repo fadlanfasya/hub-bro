@@ -15,7 +15,10 @@ export default defineConfig({
     // dev server; production serves from the backend and isn't affected.
     allowedHosts: ['.trycloudflare.com', '.cfargotunnel.com', 'localhost'],
     proxy: {
-      '/api': 'http://localhost:8000',
+      '/api': {
+        target: 'http://localhost:8000',
+        ws: true,
+      },
     },
   },
 })

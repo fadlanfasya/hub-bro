@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import sys
 
@@ -7,7 +8,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import migrations, static_files
 from .config import check_production_config, settings
-from .database import Base, engine
+from .database import Base, engine, SessionLocal
+from .models import Dashboard, User
+from . import access
 from .routers import alerts, auth_routes, dashboards, data, datasources, public, users
 from .presence import presence, user_from_token
 
@@ -74,18 +77,60 @@ app.include_router(public.router)
 @app.websocket("/api/presence/{dashboard_id}")
 async def dashboard_presence(websocket: WebSocket, dashboard_id: str, token: str = ""):
     user = user_from_token(token)
-    if user is None:
+    try:
+        dashboard_key = int(dashboard_id)
+    except ValueError:
+        dashboard_key = 0
+
+    with SessionLocal() as db:
+        dashboard = db.query(Dashboard).filter(Dashboard.id == dashboard_key).first()
+        allowed = user is not None and dashboard is not None \
+            and access.can_view_dashboard(db, user, dashboard)
+
+    if not allowed:
         await websocket.close(code=1008)
         return
     await websocket.accept()
     users = await presence.connect(dashboard_id, user.id, websocket)
-    await presence.broadcast(dashboard_id, {"type": "presence", "dashboard_id": dashboard_id, "users": users})
+
+    def room_payload(current_users):
+        with SessionLocal() as db:
+            rows = db.query(User).filter(User.id.in_(current_users)).all()
+            collaborators = [{"id": row.id, "email": row.email, "role": row.role}
+                             for row in rows]
+        return {"type": "presence", "dashboard_id": dashboard_id,
+                "users": current_users, "collaborators": collaborators}
+
+    await presence.broadcast(dashboard_id, room_payload(users))
     try:
         while True:
-            await websocket.receive_text()
+            message = await websocket.receive_text()
+            try:
+                event = json.loads(message)
+            except (TypeError, ValueError):
+                continue
+            if event.get("type") != "cursor":
+                continue
+
+            cursor = event.get("cursor")
+            if cursor is not None:
+                try:
+                    x, y = float(cursor["x"]), float(cursor["y"])
+                    if not (0 <= x <= 10000 and 0 <= y <= 10000):
+                        continue
+                    cursor = {
+                        "x": round(x, 1), "y": round(y, 1),
+                        "widget_id": str(cursor.get("widget_id")) if cursor.get("widget_id") else None,
+                    }
+                except (KeyError, TypeError, ValueError):
+                    continue
+            cursors = await presence.update_cursor(dashboard_id, user.id, websocket, cursor)
+            await presence.broadcast(dashboard_id, {
+                "type": "cursors", "dashboard_id": dashboard_id, "cursors": cursors,
+            })
     except WebSocketDisconnect:
-        users = await presence.disconnect(dashboard_id, user.id)
-        await presence.broadcast(dashboard_id, {"type": "presence", "dashboard_id": dashboard_id, "users": users})
+        users = await presence.disconnect_socket(dashboard_id, user.id, websocket)
+        await presence.broadcast(dashboard_id, room_payload(users))
 
 
 @app.get("/api/health")
