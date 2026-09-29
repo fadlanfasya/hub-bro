@@ -29,6 +29,11 @@ ADDED_COLUMNS = {
         "visibility": "VARCHAR DEFAULT 'workspace'",
     },
     "alert_rules": {
+        "group_by": "TEXT DEFAULT '[]'",
+        "group_states": "TEXT DEFAULT '{}'",
+        "dashboard_id": "INTEGER",
+        "widget_id": "VARCHAR",
+        "widget_version": "INTEGER",
         # existing rules keep alerting on thresholds; nothing starts reporting
         # on a schedule until someone asks it to
         "mode": "VARCHAR DEFAULT 'threshold'",

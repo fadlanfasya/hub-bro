@@ -49,6 +49,43 @@ def parse_days(value) -> set[int]:
     return days or set(WEEKDAYS.values())
 
 
+def parse_times(schedule: dict) -> list[dtime]:
+    """Read new multi-time schedules and the legacy single ``at`` field."""
+    values = schedule.get("times")
+    if values is None:
+        values = [schedule.get("at")]
+    if isinstance(values, str):
+        values = values.split(",")
+    parsed = {at for at in (parse_time(value) for value in (values or [])) if at}
+    return sorted(parsed)
+
+
+def _latest_slot(schedule: dict, local_now: datetime) -> datetime | None:
+    if local_now.weekday() not in parse_days(schedule.get("days")):
+        return None
+    start = parse_time(schedule.get("start")) or dtime(0, 0)
+    end = parse_time(schedule.get("end")) or dtime(23, 59)
+    candidates = []
+    every = schedule.get("every_minutes")
+    if every:
+        try:
+            every = int(every)
+        except (TypeError, ValueError):
+            every = 0
+        if every > 0 and local_now.time() >= start:
+            elapsed = (local_now.hour * 60 + local_now.minute) - (start.hour * 60 + start.minute)
+            slot_minutes = (start.hour * 60 + start.minute) + (elapsed // every) * every
+            slot = dtime((slot_minutes // 60) % 24, slot_minutes % 60)
+            if slot <= end and slot <= local_now.time():
+                candidates.append(slot)
+    else:
+        candidates = [at for at in parse_times(schedule) if at <= local_now.time()]
+    if not candidates:
+        return None
+    slot = max(candidates)
+    return local_now.replace(hour=slot.hour, minute=slot.minute, second=0, microsecond=0)
+
+
 def zone_for(name) -> ZoneInfo:
     """The report's timezone, falling back rather than failing.
 
@@ -75,20 +112,11 @@ def is_due(schedule: dict, now_utc: datetime, last_sent_utc: datetime | None) ->
     sends that day's, not yesterday's. Yesterday's numbers arriving today would
     be worse than nothing.
     """
-    at = parse_time(schedule.get("at"))
-    if at is None:
-        return False
-
     tz = zone_for(schedule.get("timezone"))
     local_now = now_utc.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz)
-
-    if local_now.weekday() not in parse_days(schedule.get("days")):
+    scheduled_local = _latest_slot(schedule, local_now)
+    if scheduled_local is None:
         return False
-
-    scheduled_local = local_now.replace(hour=at.hour, minute=at.minute,
-                                        second=0, microsecond=0)
-    if local_now < scheduled_local:
-        return False       # not time yet today
 
     if last_sent_utc is None:
         # A brand-new report must not fire for a time that already passed
@@ -105,12 +133,15 @@ def first_due_marker(schedule: dict, now_utc: datetime) -> datetime:
     Set to the most recent scheduled moment, so the next send is tomorrow's
     rather than one a few minutes after saving.
     """
-    at = parse_time(schedule.get("at")) or dtime(0, 0)
     tz = zone_for(schedule.get("timezone"))
     local_now = now_utc.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz)
-    marker = local_now.replace(hour=at.hour, minute=at.minute, second=0, microsecond=0)
-    if marker > local_now:
-        marker -= timedelta(days=1)
+    marker = _latest_slot(schedule, local_now)
+    if marker is None:
+        # Before today's first slot, anchor to yesterday's last possible slot.
+        previous = local_now - timedelta(days=1)
+        marker = _latest_slot(schedule, previous)
+    if marker is None:
+        marker = local_now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(minutes=1)
     return marker.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
 
 

@@ -84,6 +84,10 @@ export const dashboards = {
   addMember: (id, email, role) => api.post(`/dashboards/${id}/members`, { email, role }),
   removeMember: (id, userId) => api.delete(`/dashboards/${id}/members/${userId}`),
   access: (id) => api.get(`/dashboards/${id}/access`),
+  templates: () => api.get('/dashboards/templates'),
+  template: (key) => api.get(`/dashboards/templates/${key}`),
+  exportTemplate: (id) => api.get(`/dashboards/${id}/template`),
+  importTemplate: (payload) => api.post('/dashboards/templates/import', payload),
 }
 
 // read-only endpoints for shared dashboards — no auth header needed
@@ -103,6 +107,7 @@ export const alerts = {
   // evaluate now, for tuning thresholds without waiting for the interval
   run: (id) => api.post(`/alerts/${id}/run`),
   history: (id) => api.get(`/alerts/${id}/history`),
+  fromWidget: (dashboardId, widgetId) => api.get(`/alerts/from-widget/${dashboardId}/${widgetId}`),
 }
 
 export const data = {

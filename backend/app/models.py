@@ -129,11 +129,19 @@ class AlertRule(Base):
     enabled = Column(Boolean, nullable=False, default=True)
 
     datasource_id = Column(Integer, ForeignKey("datasources.id"), nullable=False, index=True)
+    # Optional origin for rules created from a dashboard widget. The query below
+    # remains a snapshot, so editing the widget later does not silently change
+    # what the alert evaluates.
+    dashboard_id = Column(Integer, ForeignKey("dashboards.id"), nullable=True, index=True)
+    widget_id = Column(String, nullable=True)
+    widget_version = Column(Integer, nullable=True)
     # JSON: the same options a widget uses (query, itemtype, range_minutes, …)
     options = Column(Text, nullable=False, default="{}")
     # which column to read, and how to reduce multiple rows to one number
     value_field = Column(String, nullable=True)
     aggregate = Column(String, nullable=False, default="first")  # first|sum|avg|min|max|count
+    group_by = Column(Text, nullable=False, default="[]")
+    group_states = Column(Text, nullable=False, default="{}")
 
     # JSON: {direction: above|below, warn: n, critical: n}
     thresholds = Column(Text, nullable=False, default="{}")
@@ -185,6 +193,16 @@ class AlertRule(Base):
     @property
     def thresholds_dict(self) -> dict:
         return json.loads(self.thresholds or "{}")
+
+    @property
+    def group_by_list(self) -> list[str]:
+        value = json.loads(self.group_by or "[]")
+        return value if isinstance(value, list) else []
+
+    @property
+    def group_states_dict(self) -> dict:
+        value = json.loads(self.group_states or "{}")
+        return value if isinstance(value, dict) else {}
 
     @property
     def schedule_dict(self) -> dict:

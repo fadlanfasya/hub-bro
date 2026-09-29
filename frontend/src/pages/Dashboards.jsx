@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  LayoutDashboard, Plus, Trash2, ArrowRight, Copy, Share2, Lock, Users, X,
+  LayoutDashboard, Plus, Trash2, ArrowRight, Copy, Share2, Lock, Users, X, LayoutTemplate,
   Star, FolderInput, Folder,
 } from 'lucide-react'
 import { dashboards } from '../api'
@@ -9,6 +9,7 @@ import { useAuth } from '../useAuth'
 import EditableTitle from '../components/EditableTitle'
 import SharePanel from '../components/SharePanel'
 import { UNFILED, folderNames, groupByFolder } from '../dashboardList'
+import TemplateModal, { downloadTemplate } from '../components/TemplateModal'
 
 export default function Dashboards() {
   const { can, user } = useAuth()
@@ -20,6 +21,7 @@ export default function Dashboards() {
   const [newVisibility, setNewVisibility] = useState('workspace')
   const [moving, setMoving] = useState(null)      // dashboard being filed
   const [folderDraft, setFolderDraft] = useState('')
+  const [templatesOpen, setTemplatesOpen] = useState(false)
 
   const groups = groupByFolder(items)
   const existingFolders = folderNames(items)
@@ -103,6 +105,16 @@ export default function Dashboards() {
     load()
   }
 
+  const exportAsTemplate = async (dashboard) => {
+    setError('')
+    try {
+      const response = await dashboards.exportTemplate(dashboard.id)
+      downloadTemplate(response.data, dashboard.name)
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Could not export template')
+    }
+  }
+
   const remove = async (id) => {
     if (!confirm('Delete this dashboard?')) return
     await dashboards.remove(id)
@@ -120,17 +132,22 @@ export default function Dashboards() {
         </div>
         <span className="spacer" />
         {canEdit && (
-          <form onSubmit={create} className="field-row" style={{ maxWidth: 560 }}>
-            <input placeholder="New dashboard name" value={name}
-              onChange={(e) => setName(e.target.value)} style={{ flex: 2 }} />
-            <select value={newVisibility} onChange={(e) => setNewVisibility(e.target.value)}
-              style={{ flex: 1.4 }} aria-label="Who can see it">
-              <option value="workspace">Whole workspace</option>
-              <option value="private">Private</option>
-              <option value="invite">Private — pick people…</option>
-            </select>
-            <button type="submit"><Plus size={15} /> Create</button>
-          </form>
+          <div className="field-row">
+            <button className="secondary" onClick={() => setTemplatesOpen(true)}>
+              <LayoutTemplate size={15} /> Templates
+            </button>
+            <form onSubmit={create} className="field-row" style={{ maxWidth: 560 }}>
+              <input placeholder="New dashboard name" value={name}
+                onChange={(e) => setName(e.target.value)} style={{ flex: 2 }} />
+              <select value={newVisibility} onChange={(e) => setNewVisibility(e.target.value)}
+                style={{ flex: 1.4 }} aria-label="Who can see it">
+                <option value="workspace">Whole workspace</option>
+                <option value="private">Private</option>
+                <option value="invite">Private — pick people…</option>
+              </select>
+              <button type="submit"><Plus size={15} /> Create</button>
+            </form>
+          </div>
         )}
       </div>
 
@@ -207,6 +224,10 @@ export default function Dashboards() {
                       onClick={() => duplicate(d.id)}>
                       <Copy size={13} />
                     </button>
+                    <button className="secondary small icon" aria-label="Export dashboard template"
+                      title="Export dashboard template" onClick={() => exportAsTemplate(d)}>
+                      <LayoutTemplate size={13} />
+                    </button>
                     {canManage(d) && (
                       <button className="danger ghost small icon" aria-label="Delete dashboard" title="Delete dashboard" onClick={() => remove(d.id)}>
                         <Trash2 size={13} />
@@ -275,6 +296,13 @@ export default function Dashboards() {
             />
           </div>
         </div>
+      )}
+
+      {templatesOpen && (
+        <TemplateModal
+          onImported={() => load()}
+          onClose={() => setTemplatesOpen(false)}
+        />
       )}
     </div>
   )

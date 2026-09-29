@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from .. import access, alerting, reports
 from ..database import get_db
-from ..models import AlertNotification, AlertRule, DataSource, User
+from ..models import AlertNotification, AlertRule, Dashboard, DataSource, User
 from ..permissions import require_alert_edit, require_alert_view
 from ..secrets_store import MASK, encrypt
 
@@ -46,6 +46,10 @@ class Webhook(BaseModel):
 
 class Schedule(BaseModel):
     at: str = ""                     # "08:00"
+    times: list[str] = []              # new multi-time form
+    every_minutes: int | None = None   # interval form
+    start: str = ""
+    end: str = ""
     days: str = ""                   # "mon,tue,..." or blank for every day
     timezone: str = "Asia/Jakarta"
 
@@ -56,6 +60,7 @@ class AlertIn(BaseModel):
     options: dict = {}
     value_field: str | None = None
     aggregate: str = "first"
+    group_by: list[str] = []
     thresholds: dict = {}
     interval_seconds: int = 300
     for_evaluations: int = 1
@@ -66,6 +71,9 @@ class AlertIn(BaseModel):
     mode: str = "threshold"
     schedule: Schedule = Schedule()
     template: str = ""
+    dashboard_id: int | None = None
+    widget_id: str | None = None
+    widget_version: int | None = None
 
 
 def _validate(body: AlertIn, db: Session, user: User):
@@ -77,6 +85,24 @@ def _validate(body: AlertIn, db: Session, user: User):
     # a private source by proxy.
     if not ds or not access.can_use_datasource(db, user, ds):
         raise HTTPException(status_code=400, detail="That data source does not exist")
+
+    if body.dashboard_id is not None or body.widget_id is not None:
+        if body.dashboard_id is None or not body.widget_id:
+            raise HTTPException(status_code=400, detail="Widget alert origin is incomplete")
+        dashboard = db.query(Dashboard).filter(Dashboard.id == body.dashboard_id).first()
+        if not dashboard or not access.can_edit_dashboard(db, user, dashboard):
+            raise HTTPException(status_code=404, detail="Dashboard or widget not found")
+        try:
+            definition = json.loads(dashboard.definition)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Dashboard definition is invalid")
+        widget = next((item for item in definition.get("widgets", [])
+                       if str(item.get("id")) == str(body.widget_id)), None)
+        if not widget or widget.get("datasource_id") != body.datasource_id:
+            raise HTTPException(status_code=400, detail="Alert widget no longer matches its data source")
+        # The source of truth is the saved widget, not a query that a caller
+        # could alter between opening the form and submitting it.
+        body.options = widget.get("options") or {}
     if body.aggregate not in VALID_AGGREGATES:
         raise HTTPException(status_code=400,
                             detail=f"Aggregate must be one of {sorted(VALID_AGGREGATES)}")
@@ -90,9 +116,16 @@ def _validate(body: AlertIn, db: Session, user: User):
     if body.mode == "report":
         # A report has no threshold to satisfy; its guard is the clock, so the
         # clock is what must be valid.
-        if reports.parse_time(body.schedule.at) is None:
+        if body.schedule.every_minutes is not None:
+            if body.schedule.every_minutes < 1:
+                raise HTTPException(status_code=400, detail="Interval must be at least 1 minute")
+            if reports.parse_time(body.schedule.start) is None or \
+                    reports.parse_time(body.schedule.end) is None:
+                raise HTTPException(status_code=400,
+                                    detail="Set a valid start and end time for the interval")
+        elif not reports.parse_times(body.schedule.model_dump()):
             raise HTTPException(status_code=400,
-                                detail="Set a send time as HH:MM, for example 08:00")
+                                detail="Set at least one send time as HH:MM")
         if not body.template.strip():
             raise HTTPException(
                 status_code=400,
@@ -123,9 +156,14 @@ def _apply(rule: AlertRule, body: AlertIn, existing_url: str = "",
            existing_headers: dict | None = None):
     rule.name = body.name.strip()
     rule.datasource_id = body.datasource_id
+    rule.dashboard_id = body.dashboard_id
+    rule.widget_id = body.widget_id
+    rule.widget_version = body.widget_version
     rule.options = json.dumps(body.options or {})
     rule.value_field = body.value_field or None
     rule.aggregate = body.aggregate
+    rule.group_by = json.dumps([str(field).strip() for field in (body.group_by or [])
+                                if str(field).strip()])
     rule.thresholds = json.dumps(body.thresholds or {})
     rule.interval_seconds = body.interval_seconds
     rule.for_evaluations = max(1, body.for_evaluations)
@@ -174,6 +212,33 @@ def list_rules(user: User = Depends(require_alert_view), db: Session = Depends(g
             d["datasource_name"] = None
         out.append(d)
     return out
+
+
+@router.get("/from-widget/{dashboard_id}/{widget_id}")
+def widget_draft(dashboard_id: int, widget_id: str,
+                 user: User = Depends(require_alert_edit), db: Session = Depends(get_db)):
+    """Return a safe alert draft for a widget; query details are never exposed here."""
+    dashboard = db.query(Dashboard).filter(Dashboard.id == dashboard_id).first()
+    if not dashboard or not access.can_edit_dashboard(db, user, dashboard):
+        raise HTTPException(status_code=404, detail="Dashboard or widget not found")
+    definition = json.loads(dashboard.definition)
+    widget = next((item for item in definition.get("widgets", [])
+                   if str(item.get("id")) == str(widget_id)), None)
+    if not widget or not widget.get("datasource_id"):
+        raise HTTPException(status_code=404, detail="Dashboard or widget not found")
+    source = db.query(DataSource).filter(DataSource.id == widget["datasource_id"]).first()
+    if not source or not access.can_use_datasource(db, user, source):
+        raise HTTPException(status_code=404, detail="Data source not found")
+    return {
+        "dashboard_id": dashboard.id,
+        "dashboard_name": dashboard.name,
+        "widget_id": str(widget_id),
+        "widget_version": dashboard.version or 1,
+        "widget_title": widget.get("title") or "Widget",
+        "datasource_id": source.id,
+        "datasource_name": source.name,
+        "options": widget.get("options") or {},
+    }
 
 
 @router.post("")

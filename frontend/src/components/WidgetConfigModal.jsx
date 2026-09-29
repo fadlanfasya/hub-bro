@@ -202,6 +202,19 @@ export default function WidgetConfigModal({
     }
     if (!opts.unpivot?.columns?.length) delete opts.unpivot
 
+    // Time-series sources should not accidentally query their entire history.
+    // An explicit false keeps a user's "No time filter" choice intact.
+    if (source?.type === 'elasticsearch') {
+      if (!opts.time_field?.trim()) opts.time_field = '@timestamp'
+      if (opts.follow_dashboard_range === undefined && !opts.range_minutes) {
+        opts.follow_dashboard_range = true
+      }
+    }
+    if (source?.type === 'prometheus' && (type === 'line' || type === 'bar')
+      && opts.follow_dashboard_range === undefined && !opts.range_minutes) {
+      opts.follow_dashboard_range = true
+    }
+
     const cleanFormats = (opts.column_format || []).filter((f) => f.column?.trim())
     if (cleanFormats.length) opts.column_format = cleanFormats
     else delete opts.column_format
@@ -363,11 +376,12 @@ export default function WidgetConfigModal({
             <input type="number" min="1" value={opts.max_rows || ''}
               onChange={(e) => setOpt('max_rows', e.target.value)} placeholder="5000" />
             <label>Time field <span className="optional">(optional)</span></label>
-            <input value={opts.time_field || ''}
+            <input value={opts.time_field || '@timestamp'}
               onChange={(e) => setOpt('time_field', e.target.value)} placeholder="@timestamp" />
             <label>Time window</label>
             <select
-              value={opts.range_minutes ? 'fixed' : (opts.follow_dashboard_range ? 'follow' : 'none')}
+              value={opts.range_minutes ? 'fixed'
+                : (opts.follow_dashboard_range || opts.follow_dashboard_range === undefined ? 'follow' : 'none')}
               onChange={(e) => {
                 const mode = e.target.value
                 setOpts((o) => ({
@@ -527,7 +541,8 @@ export default function WidgetConfigModal({
 
                 <label>Time range</label>
                 <select
-                  value={opts.range_minutes ? 'fixed' : (opts.follow_dashboard_range ? 'follow' : 'instant')}
+                   value={opts.range_minutes ? 'fixed'
+                     : (opts.follow_dashboard_range || opts.follow_dashboard_range === undefined ? 'follow' : 'instant')}
                   onChange={(e) => {
                     const mode = e.target.value
                     setOpts((o) => ({

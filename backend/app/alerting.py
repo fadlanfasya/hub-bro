@@ -125,6 +125,27 @@ def reduce_value(result: dict, field: str | None, aggregate: str = "first"):
     return values[0]
 
 
+def _group_key(row: dict, fields: list[str]) -> str:
+    return " / ".join(f"{field}={row.get(field, '—')}" for field in fields)
+
+
+def _group_state(rule, state: dict):
+    rule.state = state.get("state", "unknown")
+    rule.pending_level = state.get("pending_level")
+    rule.pending_count = state.get("pending_count", 0)
+    raw = state.get("last_notified_at")
+    rule.last_notified_at = datetime.fromisoformat(raw) if raw else None
+
+
+def _save_group_state(rule) -> dict:
+    return {
+        "state": rule.state or "unknown",
+        "pending_level": rule.pending_level,
+        "pending_count": rule.pending_count or 0,
+        "last_notified_at": rule.last_notified_at.isoformat() if rule.last_notified_at else None,
+    }
+
+
 # --------------------------------------------------------------------------
 # webhook delivery
 # --------------------------------------------------------------------------
@@ -347,6 +368,47 @@ async def evaluate(db, rule: AlertRule) -> dict:
         return {"level": "error", "error": rule.last_error}
 
     rule.last_error = None
+    group_fields = rule.group_by_list
+    if group_fields:
+        groups = {}
+        for row in (result or {}).get("rows") or []:
+            groups.setdefault(_group_key(row, group_fields), []).append(row)
+        states = dict(rule.group_states_dict)
+        transitions = []
+        levels = []
+        for key, rows in groups.items():
+            _group_state(rule, states.get(key, {}))
+            grouped_result = {"columns": result.get("columns") or [], "rows": rows}
+            value = reduce_value(grouped_result, rule.value_field, rule.aggregate)
+            level = evaluate_threshold(value, rule.thresholds_dict)
+            if level is None:
+                continue
+            levels.append(level)
+            reason = decide(rule, level, now)
+            states[key] = _save_group_state(rule)
+            if reason:
+                message = (describe(value, rule.thresholds_dict, level)
+                           if level != "ok" else f"Back to normal — current value: {value}")
+                transitions.append((key, level, value, message, reason))
+
+        rule.group_states = json.dumps(states)
+        if levels:
+            priority = {"ok": 0, "warn": 1, "critical": 2}
+            rule.state = max(levels, key=lambda item: priority.get(item, 0))
+        if transitions:
+            level = max((item[1] for item in transitions),
+                        key=lambda item: {"ok": 0, "warn": 1, "critical": 2}.get(item, 0))
+            reason = "fired" if any(item[4] == "fired" for item in transitions) \
+                else ("recovered" if any(item[4] == "recovered" for item in transitions) else "reminder")
+            message = "\n".join(f"{key}: {text}" for key, _, _, text, _ in transitions)
+            delivered = await notify(db, rule, level, None, message, reason)
+            if delivered:
+                sent_at = rule.last_notified_at.isoformat() if rule.last_notified_at else None
+                for key, _, _, _, _ in transitions:
+                    states[key]["last_notified_at"] = sent_at
+                rule.group_states = json.dumps(states)
+        return {"level": rule.state, "groups": len(groups), "notified": bool(transitions)}
+
     value = reduce_value(result, rule.value_field, rule.aggregate)
     rule.last_value = None if value is None else str(value)
 
@@ -466,9 +528,13 @@ def rule_to_dict(rule: AlertRule) -> dict:
         "enabled": rule.enabled,
         "datasource_id": rule.datasource_id,
         "datasource_name": rule.datasource.name if rule.datasource else None,
+        "dashboard_id": rule.dashboard_id,
+        "widget_id": rule.widget_id,
+        "widget_version": rule.widget_version,
         "options": rule.options_dict,
         "value_field": rule.value_field,
         "aggregate": rule.aggregate,
+        "group_by": rule.group_by_list,
         "thresholds": rule.thresholds_dict,
         "interval_seconds": rule.interval_seconds,
         "for_evaluations": rule.for_evaluations,

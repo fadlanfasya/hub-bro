@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import {
   Bell, BellOff, Plus, Trash2, Pencil, Send, Play, X, CheckCircle2, AlertTriangle, HelpCircle,
 } from 'lucide-react'
-import { alerts as alertsApi, datasources } from '../api'
+import { alerts as alertsApi, dashboards, datasources } from '../api'
 import SecretField from '../components/SecretField'
 import { useAuth } from '../useAuth'
 
@@ -21,6 +22,7 @@ const blank = {
   query: '',
   value_field: '',
   aggregate: 'first',
+  group_by: '',
   direction: 'above',
   warn: '',
   critical: '',
@@ -31,12 +33,19 @@ const blank = {
   format: 'slack',
   enabled: true,
   mode: 'threshold',
-  at: '08:00',
+  times: ['08:00'],
+  schedule_mode: 'times',
+  every_minutes: 60,
+  start: '08:00',
+  end: '18:00',
   days: '',
   timezone: 'Asia/Jakarta',
   template: '',
   body: '',
   tokenHeader: 'Authorization',
+  dashboard_id: null,
+  widget_id: null,
+  widget_version: null,
 }
 
 function timeAgo(iso) {
@@ -50,6 +59,7 @@ function timeAgo(iso) {
 
 export default function Alerts() {
   const { can } = useAuth()
+  const location = useLocation()
   const canEdit = can('alert.edit')
   const [rules, setRules] = useState([])
   const [sources, setSources] = useState([])
@@ -64,6 +74,7 @@ export default function Alerts() {
   const [busy, setBusy] = useState(null)
   const [expanded, setExpanded] = useState(null)
   const [history, setHistory] = useState([])
+  const [widgetDraft, setWidgetDraft] = useState(null)
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
 
@@ -75,8 +86,36 @@ export default function Alerts() {
     return () => clearInterval(t)
   }, [canEdit])
 
+  useEffect(() => {
+    if (!canEdit) return
+    const params = new URLSearchParams(location.search)
+    const dashboardId = params.get('dashboard_id')
+    const widgetId = params.get('widget_id')
+    if (!dashboardId || !widgetId) return
+    alertsApi.fromWidget(dashboardId, widgetId)
+      .then((res) => {
+        const draft = res.data
+        const query = draft.options?.query
+        setWidgetDraft(draft)
+        setForm((current) => ({
+          ...current,
+          name: `${draft.widget_title} alert`,
+          datasource_id: draft.datasource_id,
+          query: typeof query === 'string' ? query : JSON.stringify(query || {}, null, 2),
+          value_field: draft.options?.value_field || '',
+          aggregate: draft.options?.aggregate || 'first',
+          dashboard_id: draft.dashboard_id,
+          widget_id: draft.widget_id,
+          widget_version: draft.widget_version,
+        }))
+        setShowForm(true)
+      })
+      .catch((err) => setError(err.response?.data?.detail || 'Could not load widget alert'))
+  }, [canEdit, location.search])
+
   const reset = () => {
     setForm(blank); setWebhookUrl(''); setHasStoredUrl(false)
+    setWidgetDraft(null)
     setEditingId(null); setShowForm(false); setError('')
   }
 
@@ -87,7 +126,8 @@ export default function Alerts() {
       datasource_id: rule.datasource_id,
       query: rule.options?.query || '',
       value_field: rule.value_field || '',
-      aggregate: rule.aggregate || 'first',
+       aggregate: rule.aggregate || 'first',
+       group_by: (rule.group_by || []).join(', '),
       direction: rule.thresholds?.direction || 'above',
       warn: rule.thresholds?.warn ?? '',
       critical: rule.thresholds?.critical ?? '',
@@ -97,13 +137,20 @@ export default function Alerts() {
       notify_on_recovery: rule.notify_on_recovery,
       format: rule.webhook?.format || 'slack',
       mode: rule.mode || 'threshold',
-      at: rule.schedule?.at || '08:00',
+       times: rule.schedule?.times || [rule.schedule?.at || '08:00'],
+       schedule_mode: rule.schedule?.every_minutes ? 'interval' : 'times',
+       every_minutes: rule.schedule?.every_minutes || 60,
+       start: rule.schedule?.start || '08:00',
+       end: rule.schedule?.end || '18:00',
       days: rule.schedule?.days || '',
       timezone: rule.schedule?.timezone || 'Asia/Jakarta',
       template: rule.template || '',
       body: rule.webhook?.body || '',
       tokenHeader: Object.keys(rule.webhook?.headers || {})[0] || 'Authorization',
       enabled: rule.enabled,
+      dashboard_id: rule.dashboard_id || null,
+      widget_id: rule.widget_id || null,
+      widget_version: rule.widget_version || null,
     })
     // the URL is a credential and comes back masked — untouched means keep it
     setHasStoredUrl(Boolean(rule.webhook?.url))
@@ -112,6 +159,10 @@ export default function Alerts() {
     setHasStoredToken(headerNames.length > 0)
     setToken(headerNames.length ? null : '')
     setShowForm(true)
+    setWidgetDraft(rule.dashboard_id ? {
+      dashboard_name: rule.dashboard_name,
+      widget_title: rule.widget_title,
+    } : null)
     setError('')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -121,7 +172,8 @@ export default function Alerts() {
     datasource_id: Number(form.datasource_id),
     options: form.query ? { query: form.query } : {},
     value_field: form.value_field || null,
-    aggregate: form.aggregate,
+     aggregate: form.aggregate,
+     group_by: form.group_by.split(',').map((field) => field.trim()).filter(Boolean),
     thresholds: {
       direction: form.direction,
       warn: form.warn === '' ? null : Number(form.warn),
@@ -140,8 +192,15 @@ export default function Alerts() {
     },
     enabled: form.enabled,
     mode: form.mode,
-    schedule: { at: form.at, days: form.days, timezone: form.timezone },
+     schedule: form.schedule_mode === 'interval'
+       ? { every_minutes: Number(form.every_minutes), start: form.start, end: form.end,
+           days: form.days, timezone: form.timezone }
+       : { times: form.times.filter(Boolean), at: form.times[0] || '',
+           days: form.days, timezone: form.timezone },
     template: form.template,
+    dashboard_id: form.dashboard_id,
+    widget_id: form.widget_id,
+    widget_version: form.widget_version,
   })
 
   const submit = async (e) => {
@@ -227,13 +286,26 @@ export default function Alerts() {
             {sources.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
 
+          {widgetDraft && (
+            <div className="notice" style={{ marginBottom: 12 }}>
+              This rule uses a snapshot of widget <strong>{widgetDraft.widget_title}</strong>
+              {widgetDraft.dashboard_name ? ` from ${widgetDraft.dashboard_name}` : ''}.
+              Editing the widget later will not change this alert.
+            </div>
+          )}
           <label>Query</label>
-          <textarea rows={4} value={form.query} onChange={(e) => set('query', e.target.value)}
+          <textarea rows={4} value={form.query} readOnly={Boolean(form.dashboard_id)}
+            onChange={(e) => set('query', e.target.value)}
             placeholder="SELECT COUNT(*) AS breach FROM …" />
           <p className="hint">
             Same query you would put in a widget. It should return one number — or set
             an aggregate below to reduce many rows to one.
           </p>
+
+          <label>Group by <span className="optional">(optional, comma separated)</span></label>
+          <input value={form.group_by} onChange={(e) => set('group_by', e.target.value)}
+            placeholder="host, service" />
+          <p className="hint">Each group keeps its own breach and recovery state. One notification combines groups that change together.</p>
 
           <div className="field-row">
             <div style={{ flex: 2 }}>
@@ -268,10 +340,13 @@ export default function Alerts() {
           {form.mode === 'report' ? (
             <>
               <div className="field-row">
-                <div style={{ flex: 1 }}>
-                  <label>Send at</label>
-                  <input type="time" value={form.at}
-                    onChange={(e) => set('at', e.target.value)} required />
+                <div style={{ flex: 1.5 }}>
+                  <label>Schedule</label>
+                  <select value={form.schedule_mode}
+                    onChange={(e) => set('schedule_mode', e.target.value)}>
+                    <option value="times">Specific times</option>
+                    <option value="interval">Every interval</option>
+                  </select>
                 </div>
                 <div style={{ flex: 1.4 }}>
                   <label>Days <span className="optional">(blank = every day)</span></label>
@@ -284,6 +359,46 @@ export default function Alerts() {
                     onChange={(e) => set('timezone', e.target.value)} />
                 </div>
               </div>
+              {form.schedule_mode === 'times' ? (
+                <div>
+                  <label>Send at</label>
+                  {form.times.map((time, index) => (
+                    <div className="field-row" key={index} style={{ marginBottom: 6 }}>
+                      <input type="time" value={time}
+                        onChange={(e) => set('times', form.times.map((item, i) => i === index ? e.target.value : item))}
+                        required />
+                      {form.times.length > 1 && (
+                        <button type="button" className="secondary small" aria-label="Remove send time"
+                          onClick={() => set('times', form.times.filter((_, i) => i !== index))}>
+                          <X size={13} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  <button type="button" className="link"
+                    onClick={() => set('times', [...form.times, '09:00'])}>
+                    <Plus size={13} /> Add send time
+                  </button>
+                </div>
+              ) : (
+                <div className="field-row">
+                  <div style={{ flex: 1 }}>
+                    <label>Every (minutes)</label>
+                    <input type="number" min="1" value={form.every_minutes}
+                      onChange={(e) => set('every_minutes', e.target.value)} required />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label>Start</label>
+                    <input type="time" value={form.start}
+                      onChange={(e) => set('start', e.target.value)} required />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label>End</label>
+                    <input type="time" value={form.end}
+                      onChange={(e) => set('end', e.target.value)} required />
+                  </div>
+                </div>
+              )}
               <p className="hint">
                 The server runs on UTC, so the timezone is what makes 08:00 mean
                 08:00 where you are. A missed window is not made up later —

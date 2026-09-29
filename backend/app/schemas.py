@@ -115,6 +115,15 @@ class DashboardOut(BaseModel):
     owner_id: Optional[int] = None
 
 
+class DashboardTemplateImport(BaseModel):
+    template_key: Optional[str] = None
+    template: Optional[dict[str, Any]] = None
+    name: Optional[str] = None
+    visibility: Optional[str] = None
+    folder: Optional[str] = None
+    datasource_map: dict[str, int] = {}
+
+
 class SnapshotOut(BaseModel):
     id: int
     name: str

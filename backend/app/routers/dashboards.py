@@ -14,10 +14,14 @@ from .. import access
 from ..auth import get_current_user
 from ..database import get_db
 from ..models import (
-    VISIBILITIES, VISIBILITY_WORKSPACE, Dashboard, DashboardMember, DashboardSnapshot, User,
+    VISIBILITIES, VISIBILITY_WORKSPACE, Dashboard, DashboardMember, DashboardSnapshot,
+    DataSource, User,
 )
+from ..dashboard_templates import built_in_list, get_built_in
 from ..permissions import require_dashboard_edit
-from ..schemas import DashboardCreate, DashboardOut, DashboardUpdate, SnapshotOut
+from ..schemas import (
+    DashboardCreate, DashboardOut, DashboardTemplateImport, DashboardUpdate, SnapshotOut,
+)
 
 router = APIRouter(prefix="/api/dashboards", tags=["dashboards"])
 
@@ -101,6 +105,116 @@ def _manageable(dashboard_id: int, user: User, db: Session) -> Dashboard:
 def list_dashboards(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     rows = access.visible_dashboards(db, user).order_by(Dashboard.id).all()
     return [_to_out(d) for d in rows]
+
+
+@router.get("/templates")
+def list_templates(user: User = Depends(require_dashboard_edit)):
+    """List built-in templates available to users who can create dashboards."""
+    return built_in_list()
+
+
+@router.get("/templates/{template_key}")
+def get_template(template_key: str, user: User = Depends(require_dashboard_edit)):
+    template = get_built_in(template_key)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return {"key": template_key, **template}
+
+
+def _export_template(dashboard: Dashboard, db: Session) -> dict:
+    definition = json.loads(dashboard.definition)
+    source_keys = {}
+    required = []
+    exported = json.loads(json.dumps(definition))
+    for widget in exported.get("widgets", []):
+        datasource_id = widget.pop("datasource_id", None)
+        if datasource_id is None:
+            continue
+        source = db.query(DataSource).filter(DataSource.id == datasource_id).first()
+        if not source:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Widget {widget.get('id', 'unknown')} references a missing data source",
+            )
+        key = source_keys.get(source.id)
+        if not key:
+            key = f"source_{len(source_keys) + 1}"
+            source_keys[source.id] = key
+            required.append({"key": key, "type": source.type, "label": source.name})
+        widget["datasource_key"] = key
+
+    return {
+        "template_version": 1,
+        "name": dashboard.name,
+        "description": f"Exported from {dashboard.name}",
+        "category": "custom",
+        "required_sources": required,
+        "definition": exported,
+    }
+
+
+@router.get("/{dashboard_id}/template")
+def export_template(dashboard_id: int, user: User = Depends(require_dashboard_edit),
+                    db: Session = Depends(get_db)):
+    """Export a dashboard without credentials or datasource IDs."""
+    return _export_template(_writable(dashboard_id, user, db), db)
+
+
+@router.post("/templates/import", response_model=DashboardOut)
+def import_template(payload: DashboardTemplateImport,
+                    user: User = Depends(require_dashboard_edit),
+                    db: Session = Depends(get_db)):
+    if payload.template_key:
+        template = get_built_in(payload.template_key)
+        if not template:
+            raise HTTPException(status_code=404, detail="Template not found")
+    elif payload.template:
+        template = payload.template
+    else:
+        raise HTTPException(status_code=400, detail="Choose a template to import")
+
+    definition = json.loads(json.dumps(template.get("definition") or {}))
+    if not isinstance(definition, dict) or not isinstance(definition.get("widgets"), list):
+        raise HTTPException(status_code=400, detail="Template has an invalid dashboard definition")
+    if len(json.dumps(definition)) > 1_000_000:
+        raise HTTPException(status_code=400, detail="Template is too large")
+
+    required = template.get("required_sources") or []
+    required_keys = {item.get("key") for item in required if item.get("key")}
+    missing = sorted(required_keys - set(payload.datasource_map))
+    if missing:
+        raise HTTPException(status_code=400, detail=f"Map every required data source: {', '.join(missing)}")
+
+    for widget in definition["widgets"]:
+        source_key = widget.pop("datasource_key", None)
+        if source_key is None:
+            widget.pop("datasource_id", None)
+            continue
+        datasource_id = payload.datasource_map.get(source_key)
+        source = db.query(DataSource).filter(DataSource.id == datasource_id).first()
+        if not source or not access.can_use_datasource(db, user, source):
+            raise HTTPException(status_code=404, detail=f"Data source for '{source_key}' was not found")
+        expected = next((item.get("type") for item in required if item.get("key") == source_key), None)
+        if expected and source.type != expected:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Data source for '{source_key}' must be type {expected}",
+            )
+        widget["datasource_id"] = source.id
+
+    visibility = payload.visibility or VISIBILITY_WORKSPACE
+    if visibility not in VISIBILITIES:
+        raise HTTPException(status_code=400,
+                            detail=f"Visibility must be one of {list(VISIBILITIES)}")
+    dashboard = Dashboard(
+        name=(payload.name or template.get("name") or "Imported dashboard").strip(),
+        definition=json.dumps(definition), owner_id=user.id, visibility=visibility,
+        folder=_clean_folder(payload.folder),
+    )
+    db.add(dashboard)
+    db.commit()
+    db.refresh(dashboard)
+    return _to_out(dashboard)
 
 
 def _clean_folder(value: str | None) -> str | None:

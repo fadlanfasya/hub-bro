@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import {
-  RefreshCw, Plus, GripVertical, Pencil, X, LayoutGrid, ChevronLeft, Check,
+  RefreshCw, Plus, GripVertical, Pencil, X, LayoutGrid, ChevronLeft, Check, Bell,
   Loader2, Copy, Share2, Lock, Unlock, Eye, Palette, Filter, History, AlertCircle,
 } from 'lucide-react'
 import HistoryModal from '../components/HistoryModal'
@@ -248,6 +248,10 @@ export default function DashboardEditor() {
     }))
   }
 
+  const createWidgetAlert = (widgetId) => {
+    navigate(`/alerts?dashboard_id=${encodeURIComponent(id)}&widget_id=${encodeURIComponent(widgetId)}`)
+  }
+
   // gridstack reports geometry after a drag or resize settles
   const onLayoutChange = useCallback((gridItems) => {
     const layout = toStoredLayout(gridItems)
@@ -301,6 +305,12 @@ export default function DashboardEditor() {
                   onClick={() => duplicateWidget(w)}>
                   <Copy size={13} />
                 </button>
+                {can('alert.edit') && w.datasource_id && (
+                  <button className="ghost small icon" aria-label="Create alert from widget"
+                    title="Create alert from widget" onClick={() => createWidgetAlert(w.id)}>
+                    <Bell size={13} />
+                  </button>
+                )}
                 <button className="danger ghost small icon" aria-label="Remove widget" title="Remove widget"
                   onClick={() => removeWidget(w.id)}>
                   <X size={14} />

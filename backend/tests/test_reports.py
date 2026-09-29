@@ -111,6 +111,20 @@ check("saved at 07:30, this morning's 08:00 still goes out",
 check("no time configured means it never fires",
       reports.is_due({"timezone": "Asia/Jakarta"}, utc(2026, 8, 20, 1, 0), yesterday), False)
 
+print("multiple send times and intervals")
+MULTI = {"times": ["09:00", "10:00"], "timezone": "Asia/Jakarta"}
+check("multiple times accept the first slot",
+      reports.is_due(MULTI, utc(2026, 8, 20, 2, 0), yesterday), True)
+check("multiple times accept the second slot",
+      reports.is_due(MULTI, utc(2026, 8, 20, 3, 0), utc(2026, 8, 20, 2, 0)), True)
+check("a slot is not sent twice",
+      reports.is_due(MULTI, utc(2026, 8, 20, 3, 1), utc(2026, 8, 20, 3, 0)), False)
+HOURLY = {"every_minutes": 60, "start": "09:00", "end": "17:00", "timezone": "Asia/Jakarta"}
+check("hourly interval is due inside its window",
+      reports.is_due(HOURLY, utc(2026, 8, 20, 3, 0), yesterday), True)
+check("hourly interval waits for the next slot",
+      reports.is_due(HOURLY, utc(2026, 8, 20, 3, 30), utc(2026, 8, 20, 3, 0)), False)
+
 print("writing the message")
 row = {"breach": 2, "warning": 0, "on_track": 13, "resolved": 24.0}
 check("placeholders are filled",
